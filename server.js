@@ -17,8 +17,16 @@ app.get('/ticket/:id', async (req, res) => {
     }
   });
 
-  const data = await response.json();
-  const ticket = data.ticket;
+const data = await response.json();
+
+if (!data.ticket) {
+  return res.status(500).send(`
+    <h2 style="font-family:sans-serif;padding:2rem">Fout bij ophalen ticket</h2>
+    <pre style="padding:2rem;background:#f5f5f5">${JSON.stringify(data, null, 2)}</pre>
+  `);
+}
+
+const ticket = data.ticket;
 
   res.send(`<!DOCTYPE html>
 <html lang="nl">
