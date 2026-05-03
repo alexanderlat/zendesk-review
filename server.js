@@ -74,7 +74,7 @@ const ticket = data.ticket;
     </div>
 
     <div class="badge">Gegenereerd door Claude</div>
-    <textarea id="reply">${decodeURIComponent(req.query.concept || '')}</textarea>
+  <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<[^>]*>/g, '')}</textarea>
 
     <div class="actions">
       <button class="btn-primary" onclick="verstuur()">Goedkeuren & versturen</button>
