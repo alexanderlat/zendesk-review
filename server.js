@@ -120,7 +120,8 @@ app.post('/reply', async (req, res) => {
     },
     body: JSON.stringify({
       ticket: {
-        comment: { body: reply, public: true }
+        comment: { body: reply, public: true },
+        status: 'pending'
       }
     })
   });
