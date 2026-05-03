@@ -10,7 +10,27 @@ const ZENDESK_TOKEN = process.env.ZENDESK_TOKEN;
 
 app.get('/ticket/:id', async (req, res) => {
   const ticketId = req.params.id;
-
+  
+async function vertaalNaarNederlands(tekst) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      messages: [{
+        role: 'user',
+        content: 'Detecteer de taal van onderstaande tekst. Als de taal Nederlands is, antwoord dan alleen met het woord "NL". Als de taal niet Nederlands is, vertaal de tekst dan naar Nederlands en geef alleen de vertaling terug, zonder uitleg of toevoeging.\n\nTekst:\n' + tekst
+      }]
+    })
+  });
+  const data = await response.json();
+  return data.content[0].text.trim();
+}
   const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
       'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
