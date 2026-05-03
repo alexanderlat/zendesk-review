@@ -8,9 +8,6 @@ const ZENDESK_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN;
 const ZENDESK_EMAIL = process.env.ZENDESK_EMAIL;
 const ZENDESK_TOKEN = process.env.ZENDESK_TOKEN;
 
-app.get('/ticket/:id', async (req, res) => {
-  const ticketId = req.params.id;
-  
 async function vertaalNaarNederlands(tekst) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -31,22 +28,29 @@ async function vertaalNaarNederlands(tekst) {
   const data = await response.json();
   return data.content[0].text.trim();
 }
+
+app.get('/ticket/:id', async (req, res) => {
+  const ticketId = req.params.id;
+
   const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
       'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
     }
   });
 
-const data = await response.json();
+  const data = await response.json();
 
-if (!data.ticket) {
-  return res.status(500).send(`
-    <h2 style="font-family:sans-serif;padding:2rem">Fout bij ophalen ticket</h2>
-    <pre style="padding:2rem;background:#f5f5f5">${JSON.stringify(data, null, 2)}</pre>
-  `);
-}
+  if (!data.ticket) {
+    return res.status(500).send(`
+      <h2 style="font-family:sans-serif;padding:2rem">Fout bij ophalen ticket</h2>
+      <pre style="padding:2rem;background:#f5f5f5">${JSON.stringify(data, null, 2)}</pre>
+    `);
+  }
 
-const ticket = data.ticket;
+  const ticket = data.ticket;
+  const klanttekst = ticket.description || '';
+  const vertaling = await vertaalNaarNederlands(klanttekst);
+  const toonVertaling = vertaling !== 'NL';
 
   res.send(`<!DOCTYPE html>
 <html lang="nl">
@@ -75,6 +79,7 @@ const ticket = data.ticket;
     .meta { display: flex; gap: 1.5rem; margin-bottom: 1rem; }
     .meta-item { font-size: 12px; color: #888; }
     .meta-item span { color: #111; font-weight: 500; }
+    .vertaling { background: #f0f5ff; border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.75rem; }
   </style>
 </head>
 <body>
@@ -92,14 +97,14 @@ const ticket = data.ticket;
       <div class="label">Bericht van klant</div>
       <div class="body">${ticket.description}</div>
       ${toonVertaling ? `
-      <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 0.75rem 0;">
-      <div class="label" style="color: #1a56db;">Nederlandse vertaling</div>
-      <div class="body" style="color: #444; font-style: italic;">${vertaling}</div>
-      ` : ''}
+      <div class="vertaling">
+        <div class="label" style="color: #1a56db; margin-bottom: 6px;">Nederlandse vertaling</div>
+        <div class="body" style="font-style: italic;">${vertaling}</div>
+      </div>` : ''}
     </div>
 
     <div class="badge">Gegenereerd door Claude</div>
-  <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<[^>]*>/g, '')}</textarea>
+    <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<[^>]*>/g, '')}</textarea>
 
     <div class="actions">
       <button class="btn-primary" onclick="verstuur()">Goedkeuren & versturen</button>
