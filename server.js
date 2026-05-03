@@ -91,6 +91,11 @@ const ticket = data.ticket;
       <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 0.75rem 0;">
       <div class="label">Bericht van klant</div>
       <div class="body">${ticket.description}</div>
+      ${toonVertaling ? `
+      <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 0.75rem 0;">
+      <div class="label" style="color: #1a56db;">Nederlandse vertaling</div>
+      <div class="body" style="color: #444; font-style: italic;">${vertaling}</div>
+      ` : ''}
     </div>
 
     <div class="badge">Gegenereerd door Claude</div>
