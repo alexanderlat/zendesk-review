@@ -104,7 +104,7 @@ app.get('/ticket/:id', async (req, res) => {
     </div>
 
     <div class="badge">Gegenereerd door Claude</div>
-    <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<[^>]*>/g, '')}</textarea>
+   <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '')}</textarea>
 
     <div class="actions">
       <button class="btn-primary" onclick="verstuur()">Goedkeuren & versturen</button>
