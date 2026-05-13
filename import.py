@@ -1,0 +1,115 @@
+import os
+import requests
+import json
+from openai import OpenAI
+
+ZENDESK_SUBDOMAIN = os.environ.get('ZENDESK_SUBDOMAIN')
+ZENDESK_EMAIL = os.environ.get('ZENDESK_EMAIL')
+ZENDESK_TOKEN = os.environ.get('ZENDESK_TOKEN')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
+
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+def get_embedding(tekst):
+    response = openai_client.embeddings.create(
+        input=tekst,
+        model="text-embedding-3-small"
+    )
+    return response.data[0].embedding
+
+def sla_op_in_supabase(zendesk_id, subject, vraag, antwoord, embedding):
+    headers = {
+        'apikey': SUPABASE_KEY,
+        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'Content-Type': 'application/json'
+    }
+    data = {
+        'zendesk_id': str(zendesk_id),
+        'subject': subject,
+        'vraag': vraag,
+        'antwoord': antwoord,
+        'embedding': embedding
+    }
+    response = requests.post(
+        f'{SUPABASE_URL}/rest/v1/tickets',
+        headers=headers,
+        json=data
+    )
+    return response.status_code
+
+def get_agent_ids():
+    auth = (f'{ZENDESK_EMAIL}/token', ZENDESK_TOKEN)
+    response = requests.get(
+        f'https://{ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/users.json?role=agent',
+        auth=auth
+    )
+    data = response.json()
+    return [user['id'] for user in data.get('users', [])]
+
+def importeer_tickets():
+    auth = (f'{ZENDESK_EMAIL}/token', ZENDESK_TOKEN)
+    agent_ids = get_agent_ids()
+    print(f'Gevonden agents: {len(agent_ids)}')
+
+    url = f'https://{ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/incremental/tickets.json?start_time=1704067200'
+    totaal = 0
+    opgeslagen = 0
+
+    while url:
+        response = requests.get(url, auth=auth)
+        data = response.json()
+        tickets = data.get('tickets', [])
+
+        for ticket in tickets:
+            if ticket.get('status') != 'pending':
+                continue
+
+            totaal += 1
+            ticket_id = ticket['id']
+            subject = ticket.get('subject', '')
+
+            comments_response = requests.get(
+                f'https://{ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/{ticket_id}/comments.json',
+                auth=auth
+            )
+            comments = comments_response.json().get('comments', [])
+
+            publieke_comments = [c for c in comments if c.get('public')]
+            if len(publieke_comments) < 2:
+                continue
+
+            klant_bericht = publieke_comments[0].get('body', '')
+            agent_antwoord = None
+            for comment in publieke_comments[1:]:
+                if comment.get('author_id') in agent_ids:
+                    agent_antwoord = comment.get('body', '')
+                    break
+
+            if not agent_antwoord:
+                continue
+
+            tekst_voor_embedding = f'Onderwerp: {subject}\nVraag: {klant_bericht[:500]}'
+            embedding = get_embedding(tekst_voor_embedding)
+
+            status = sla_op_in_supabase(
+                ticket_id, subject,
+                klant_bericht[:1000],
+                agent_antwoord[:1000],
+                embedding
+            )
+
+            if status == 201:
+                opgeslagen += 1
+                print(f'Opgeslagen: ticket {ticket_id} ({opgeslagen} totaal)')
+
+        if data.get('end_of_stream'):
+            break
+
+        url = data.get('next_page')
+        print(f'Volgende pagina... ({totaal} tickets verwerkt, {opgeslagen} opgeslagen)')
+
+    print(f'Klaar! {totaal} tickets verwerkt, {opgeslagen} opgeslagen in Supabase.')
+
+importeer_tickets()
