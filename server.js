@@ -57,6 +57,7 @@ async function maakSamenvatting(comments) {
 
 app.get('/ticket/:id', async (req, res) => {
   const ticketId = req.params.id;
+
   const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
       'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
@@ -70,9 +71,6 @@ app.get('/ticket/:id', async (req, res) => {
     `);
   }
   const ticket = data.ticket;
-  const klanttekst = ticket.description || '';
-  const vertaling = await vertaalNaarNederlands(klanttekst);
-  const toonVertaling = vertaling !== 'NL';
 
   const commentsResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments.json`, {
     headers: {
@@ -82,6 +80,11 @@ app.get('/ticket/:id', async (req, res) => {
   const commentsData = await commentsResponse.json();
   const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
   const heeftMeerdereReacties = publiciekeComments.length > 1;
+  const laatsteBericht = publiciekeComments.length > 0 ? publiciekeComments[publiciekeComments.length - 1].body || '' : ticket.description || '';
+
+  const vertaling = await vertaalNaarNederlands(laatsteBericht);
+  const toonVertaling = vertaling !== 'NL';
+
   const samenvatting = heeftMeerdereReacties ? await maakSamenvatting(publiciekeComments) : '';
   const samenvattingHtml = samenvatting.split('\n').map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
 
@@ -126,8 +129,8 @@ app.get('/ticket/:id', async (req, res) => {
       <div class="label">Onderwerp</div>
       <div class="subject">${ticket.subject}</div>
       <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 0.75rem 0;">
-      <div class="label">Bericht van klant</div>
-      <div class="body">${ticket.description}</div>
+      <div class="label">Laatste bericht</div>
+      <div class="body">${laatsteBericht}</div>
       ${toonVertaling ? `
       <div class="vertaling">
         <div class="label" style="color: #1a56db; margin-bottom: 6px;">Nederlandse vertaling</div>
