@@ -64,7 +64,8 @@ app.get('/ticket/:id', async (req, res) => {
     .subject { font-size: 15px; font-weight: 600; margin-bottom: 0.75rem; }
     .body { font-size: 14px; color: #444; line-height: 1.6; }
     .badge { display: inline-block; font-size: 11px; background: #e8f0fe; color: #1a56db; border-radius: 20px; padding: 2px 10px; margin-bottom: 8px; }
-textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 300px; line-height: 1.6; }    textarea:focus { outline: none; border-color: #888; }
+    textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 300px; line-height: 1.6; }
+    textarea:focus { outline: none; border-color: #888; }
     .actions { display: flex; gap: 10px; margin-top: 1rem; }
     button { padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid #ddd; background: white; }
     .btn-primary { background: #111; color: white; border-color: transparent; }
@@ -96,8 +97,17 @@ textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12p
         <div class="body" style="font-style: italic;">${vertaling}</div>
       </div>` : ''}
     </div>
+
     <div class="badge">Gegenereerd door Claude</div>
     <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '')}</textarea>
+
+    <div style="margin-top: 0.75rem;">
+      <div class="label" style="margin-bottom: 6px;">Instructies voor Claude</div>
+      <textarea id="instructie" placeholder="Bijv: Maak het korter, voeg levertijd toe, schrijf formeler..." style="width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 60px; line-height: 1.6;"></textarea>
+      <button onclick="aanpassen()" style="margin-top: 8px; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid #ddd; background: white;">Aanpassen met Claude ↻</button>
+      <span id="laden" style="display:none; font-size: 13px; color: #888; margin-left: 10px;">Claude denkt na...</span>
+    </div>
+
     <div class="actions">
       <button class="btn-primary" onclick="verstuur()">Goedkeuren & versturen</button>
       <button onclick="sla()">Overslaan</button>
@@ -105,7 +115,33 @@ textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12p
     <div class="success" id="success">Antwoord verstuurd naar de klant!</div>
     <div class="error" id="error">Er ging iets mis. Probeer het opnieuw.</div>
   </div>
+
   <script>
+    async function aanpassen() {
+      const instructie = document.getElementById('instructie').value;
+      const huidigAntwoord = document.getElementById('reply').value;
+      if (!instructie) {
+        alert('Vul eerst een instructie in.');
+        return;
+      }
+      document.getElementById('laden').style.display = 'inline';
+      const res = await fetch('/aanpassen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticketId: '${ticketId}',
+          huidigAntwoord: huidigAntwoord,
+          instructie: instructie
+        })
+      });
+      const data = await res.json();
+      document.getElementById('laden').style.display = 'none';
+      if (data.antwoord) {
+        document.getElementById('reply').value = data.antwoord;
+        document.getElementById('instructie').value = '';
+      }
+    }
+
     async function verstuur() {
       const reply = document.getElementById('reply').value;
       const res = await fetch('/reply', {
@@ -120,6 +156,7 @@ textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12p
         document.getElementById('error').style.display = 'block';
       }
     }
+
     function sla() {
       if (confirm('Weet je zeker dat je dit ticket wilt overslaan?')) {
         document.querySelectorAll('button').forEach(b => b.disabled = true);
@@ -130,10 +167,43 @@ textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12p
 </html>`);
 });
 
+app.post('/aanpassen', async (req, res) => {
+  const { ticketId, huidigAntwoord, instructie } = req.body;
+
+  const ticketResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
+    }
+  });
+  const ticketData = await ticketResponse.json();
+  const ticket = ticketData.ticket;
+
+  const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      messages: [{
+        role: 'user',
+        content: `Dit is het originele ticket:\nOnderwerp: ${ticket.subject}\n\n${ticket.description}\n\nDit is het huidige conceptantwoord:\n${huidigAntwoord}\n\nPas het antwoord aan op basis van deze instructie: ${instructie}\n\nGeef alleen het aangepaste antwoord terug, zonder uitleg.`
+      }]
+    })
+  });
+
+  const claudeData = await claudeResponse.json();
+  const antwoord = claudeData.content[0].text;
+
+  res.json({ antwoord });
+});
+
 app.post('/reply', async (req, res) => {
   const { ticketId, reply } = req.body;
 
-  // Antwoord versturen naar Zendesk
   const zendeskResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     method: 'PUT',
     headers: {
@@ -152,7 +222,6 @@ app.post('/reply', async (req, res) => {
     return res.sendStatus(500);
   }
 
-  // Ticket ophalen voor subject en description
   const ticketResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
       'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
@@ -162,7 +231,6 @@ app.post('/reply', async (req, res) => {
   const ticketData = await ticketResponse.json();
   const ticket = ticketData.ticket;
 
-  // OpenAI embedding maken
   const openaiResponse = await fetch('https://api.openai.com/v1/embeddings', {
     method: 'POST',
     headers: {
@@ -178,7 +246,6 @@ app.post('/reply', async (req, res) => {
   const openaiData = await openaiResponse.json();
   const embedding = openaiData.data[0].embedding;
 
-  // Opslaan in Supabase
   await fetch(`${process.env.SUPABASE_URL}/tickets`, {
     method: 'POST',
     headers: {
