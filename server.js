@@ -57,6 +57,7 @@ async function maakSamenvatting(comments) {
 
 app.get('/ticket/:id', async (req, res) => {
   const ticketId = req.params.id;
+  const agentId = req.query.agent_id || '';
 
   const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
@@ -196,7 +197,7 @@ app.get('/ticket/:id', async (req, res) => {
       const res = await fetch('/reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketId: '${ticketId}', reply })
+        body: JSON.stringify({ ticketId: '${ticketId}', reply, agentId: '${agentId}' })
       });
       if (res.ok) {
         document.getElementById('success').style.display = 'block';
@@ -253,7 +254,16 @@ app.post('/aanpassen', async (req, res) => {
 });
 
 app.post('/reply', async (req, res) => {
-  const { ticketId, reply } = req.body;
+  const { ticketId, reply, agentId } = req.body;
+
+  const commentBody = {
+    body: reply,
+    public: true
+  };
+
+  if (agentId) {
+    commentBody.author_id = parseInt(agentId);
+  }
 
   const zendeskResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     method: 'PUT',
@@ -263,7 +273,7 @@ app.post('/reply', async (req, res) => {
     },
     body: JSON.stringify({
       ticket: {
-        comment: { body: reply, public: true },
+        comment: commentBody,
         status: 'pending'
       }
     })
