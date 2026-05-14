@@ -64,8 +64,7 @@ app.get('/ticket/:id', async (req, res) => {
     .subject { font-size: 15px; font-weight: 600; margin-bottom: 0.75rem; }
     .body { font-size: 14px; color: #444; line-height: 1.6; }
     .badge { display: inline-block; font-size: 11px; background: #e8f0fe; color: #1a56db; border-radius: 20px; padding: 2px 10px; margin-bottom: 8px; }
-    textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 160px; line-height: 1.6; }
-    textarea:focus { outline: none; border-color: #888; }
+textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 300px; line-height: 1.6; }    textarea:focus { outline: none; border-color: #888; }
     .actions { display: flex; gap: 10px; margin-top: 1rem; }
     button { padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid #ddd; background: white; }
     .btn-primary { background: #111; color: white; border-color: transparent; }
