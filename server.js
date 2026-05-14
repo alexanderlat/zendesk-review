@@ -29,6 +29,32 @@ async function vertaalNaarNederlands(tekst) {
   return data.content[0].text.trim();
 }
 
+async function maakSamenvatting(comments) {
+  const gesprek = comments.map((c, i) => {
+    const rol = i === 0 ? 'Klant' : (c.via && c.via.channel === 'web' ? 'Medewerker' : 'Klant');
+    return rol + ': ' + (c.body || '').slice(0, 500);
+  }).join('\n\n');
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 500,
+      messages: [{
+        role: 'user',
+        content: 'Maak een korte samenvatting van dit gesprek in maximaal 5 opsommingspunten. Gebruik het formaat "- punt". Geef alleen de opsommingspunten terug, geen inleiding of afsluiting.\n\n' + gesprek
+      }]
+    })
+  });
+  const data = await response.json();
+  return data.content[0].text.trim();
+}
+
 app.get('/ticket/:id', async (req, res) => {
   const ticketId = req.params.id;
   const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
@@ -47,6 +73,17 @@ app.get('/ticket/:id', async (req, res) => {
   const klanttekst = ticket.description || '';
   const vertaling = await vertaalNaarNederlands(klanttekst);
   const toonVertaling = vertaling !== 'NL';
+
+  const commentsResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments.json`, {
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
+    }
+  });
+  const commentsData = await commentsResponse.json();
+  const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
+  const heeftMeerdereReacties = publiciekeComments.length > 1;
+  const samenvatting = heeftMeerdereReacties ? await maakSamenvatting(publiciekeComments) : '';
+  const samenvattingHtml = samenvatting.split('\n').map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
 
   res.send(`<!DOCTYPE html>
 <html lang="nl">
@@ -96,6 +133,12 @@ app.get('/ticket/:id', async (req, res) => {
         <div class="label" style="color: #1a56db; margin-bottom: 6px;">Nederlandse vertaling</div>
         <div class="body" style="font-style: italic;">${vertaling}</div>
       </div>` : ''}
+      ${heeftMeerdereReacties ? `
+      <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 0.75rem 0;">
+      <div class="label" style="margin-bottom: 6px;">Samenvatting gesprek</div>
+      <ul style="font-size: 14px; color: #444; line-height: 1.8; padding-left: 1.2rem;">
+        ${samenvattingHtml}
+      </ul>` : ''}
     </div>
 
     <div class="badge">Gegenereerd door Claude</div>
