@@ -189,6 +189,9 @@ app.get('/ticket/:id', async (req, res) => {
     }
 
     async function verstuur() {
+      const knop = document.querySelector('.btn-primary');
+      knop.disabled = true;
+      knop.textContent = 'Bezig met versturen...';
       const reply = document.getElementById('reply').value;
       const res = await fetch('/reply', {
         method: 'POST',
@@ -200,6 +203,8 @@ app.get('/ticket/:id', async (req, res) => {
         document.querySelectorAll('button').forEach(b => b.disabled = true);
       } else {
         document.getElementById('error').style.display = 'block';
+        knop.disabled = false;
+        knop.textContent = 'Goedkeuren & versturen';
       }
     }
 
