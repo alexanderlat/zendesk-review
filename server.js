@@ -31,22 +31,18 @@ async function vertaalNaarNederlands(tekst) {
 
 app.get('/ticket/:id', async (req, res) => {
   const ticketId = req.params.id;
-
   const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
       'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
     }
   });
-
   const data = await response.json();
-
   if (!data.ticket) {
     return res.status(500).send(`
       <h2 style="font-family:sans-serif;padding:2rem">Fout bij ophalen ticket</h2>
       <pre style="padding:2rem;background:#f5f5f5">${JSON.stringify(data, null, 2)}</pre>
     `);
   }
-
   const ticket = data.ticket;
   const klanttekst = ticket.description || '';
   const vertaling = await vertaalNaarNederlands(klanttekst);
@@ -85,7 +81,6 @@ app.get('/ticket/:id', async (req, res) => {
 <body>
   <div class="container">
     <h1>Ticket review</h1>
-
     <div class="card">
       <div class="meta">
         <div class="meta-item">Ticket <span>#${ticket.id}</span></div>
@@ -102,10 +97,8 @@ app.get('/ticket/:id', async (req, res) => {
         <div class="body" style="font-style: italic;">${vertaling}</div>
       </div>` : ''}
     </div>
-
     <div class="badge">Gegenereerd door Claude</div>
-   <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '')}</textarea>
-
+    <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '')}</textarea>
     <div class="actions">
       <button class="btn-primary" onclick="verstuur()">Goedkeuren & versturen</button>
       <button onclick="sla()">Overslaan</button>
@@ -113,7 +106,6 @@ app.get('/ticket/:id', async (req, res) => {
     <div class="success" id="success">Antwoord verstuurd naar de klant!</div>
     <div class="error" id="error">Er ging iets mis. Probeer het opnieuw.</div>
   </div>
-
   <script>
     async function verstuur() {
       const reply = document.getElementById('reply').value;
@@ -142,7 +134,8 @@ app.get('/ticket/:id', async (req, res) => {
 app.post('/reply', async (req, res) => {
   const { ticketId, reply } = req.body;
 
-  const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
+  // Antwoord versturen naar Zendesk
+  const zendeskResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -156,11 +149,55 @@ app.post('/reply', async (req, res) => {
     })
   });
 
-  if (response.ok) {
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(500);
+  if (!zendeskResponse.ok) {
+    return res.sendStatus(500);
   }
+
+  // Ticket ophalen voor subject en description
+  const ticketResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
+    }
+  });
+
+  const ticketData = await ticketResponse.json();
+  const ticket = ticketData.ticket;
+
+  // OpenAI embedding maken
+  const openaiResponse = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: ('Onderwerp: ' + (ticket.subject || '') + ' ' + (ticket.description || '')).slice(0, 8000)
+    })
+  });
+
+  const openaiData = await openaiResponse.json();
+  const embedding = openaiData.data[0].embedding;
+
+  // Opslaan in Supabase
+  await fetch(`${process.env.SUPABASE_URL}/tickets`, {
+    method: 'POST',
+    headers: {
+      'apikey': process.env.SUPABASE_KEY,
+      'Authorization': `Bearer ${process.env.SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    },
+    body: JSON.stringify({
+      zendesk_id: String(ticketId),
+      subject: ticket.subject || '',
+      vraag: (ticket.description || '').slice(0, 1000),
+      antwoord: reply.slice(0, 1000),
+      embedding: embedding
+    })
+  });
+
+  res.sendStatus(200);
 });
 
 app.listen(process.env.PORT || 3000, () => {
