@@ -10,8 +10,8 @@
   const DEFAULT_W  = 540;
   const MIN_W      = 320;
   const MAX_W      = () => Math.round(window.innerWidth * 0.85);
-  const DEFAULT_CW = 620;
-  const DEFAULT_CH = () => Math.round(window.innerHeight * 0.88);
+  const DEFAULT_CW = 1100;
+  const DEFAULT_CH = () => Math.round(window.innerHeight * 0.90);
   const MIN_CW = 360;
   const MIN_CH = 400;
 

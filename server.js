@@ -108,9 +108,9 @@ app.get('/ticket/:id', async (req, res) => {
       --green-mid: #2D5C44;
       --green-light: #E8F2EC;
       --green-border: #C2DDC9;
-      --bg: #FAFAF8;
+      --bg: #F4F5F3;
       --surface: #FFFFFF;
-      --border: #E8E8E4;
+      --border: #E3E4E0;
       --text: #1A1A18;
       --text-soft: #6B6B65;
       --text-xsoft: #9E9E96;
@@ -121,97 +121,125 @@ app.get('/ticket/:id', async (req, res) => {
       --red-text: #991B1B;
     }
 
-    html { font-size: 14px; }
-
-    body {
+    html, body {
+      height: 100%;
+      font-size: 14px;
       font-family: 'Inter', -apple-system, sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.5;
-      min-height: 100vh;
+      overflow: hidden;
     }
 
-    .layout {
-      max-width: 680px;
-      margin: 0 auto;
-      padding: 1.75rem 1.25rem 3rem;
+    /* ── Hoofdstructuur: topbar + 2 kolommen ── */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
     }
 
-    /* Header */
-    .header {
+    .topbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1.5rem;
+      padding: 10px 18px;
+      background: var(--green-dark);
+      color: #fff;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
     }
 
-    .ticket-ref {
-      font-size: 12px;
+    .topbar-left { display: flex; flex-direction: column; gap: 1px; }
+
+    .topbar-ref {
+      font-size: 11px;
       font-weight: 500;
-      color: var(--text-xsoft);
+      opacity: 0.6;
       letter-spacing: 0.02em;
     }
 
-    .ticket-subject {
-      font-size: 17px;
+    .topbar-subject {
+      font-size: 14px;
       font-weight: 600;
-      color: var(--text);
-      margin-top: 2px;
+      line-height: 1.3;
     }
 
-    .claude-badge {
+    .topbar-badge {
       display: flex;
       align-items: center;
       gap: 5px;
       font-size: 11px;
       font-weight: 500;
-      color: var(--text-soft);
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.12);
       border-radius: 20px;
       padding: 4px 10px;
       white-space: nowrap;
+      opacity: 0.85;
     }
 
-    .claude-badge svg { flex-shrink: 0; }
+    .columns {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
 
-    /* Cards */
-    .card {
+    /* ── Linkerkolom ── */
+    .col-left {
+      width: 38%;
+      min-width: 280px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1.125rem 1.25rem;
-      margin-bottom: 0.875rem;
+      overflow: hidden;
     }
 
-    .card-label {
-      font-size: 11px;
-      font-weight: 500;
+    .col-section {
+      padding: 14px 16px;
+    }
+
+    .col-section + .col-section {
+      border-top: 1px solid var(--border);
+    }
+
+    .section-label {
+      font-size: 10.5px;
+      font-weight: 600;
       color: var(--text-xsoft);
+      letter-spacing: 0.07em;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 0.5rem;
+      margin-bottom: 8px;
+    }
+
+    /* Bericht neemt alle vrije ruimte */
+    .bericht-sectie {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
     }
 
     .bericht-tekst {
       font-size: 13.5px;
       color: var(--text);
-      line-height: 1.65;
+      line-height: 1.7;
       white-space: pre-wrap;
     }
 
     .vertaling-blok {
-      margin-top: 0.875rem;
-      padding: 0.75rem 1rem;
+      margin-top: 12px;
+      padding: 10px 12px;
       background: var(--blue-light);
       border: 1px solid var(--blue-border);
       border-radius: 7px;
     }
 
     .vertaling-label {
-      font-size: 11px;
-      font-weight: 500;
+      font-size: 10.5px;
+      font-weight: 600;
       color: var(--blue-text);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
       margin-bottom: 4px;
     }
 
@@ -222,18 +250,24 @@ app.get('/ticket/:id', async (req, res) => {
       font-style: italic;
     }
 
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 10px 0;
+    }
+
     .samenvatting-lijst {
       list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 5px;
     }
 
     .samenvatting-lijst li {
-      font-size: 13.5px;
+      font-size: 13px;
       color: var(--text);
-      line-height: 1.55;
-      padding-left: 1rem;
+      line-height: 1.5;
+      padding-left: 14px;
       position: relative;
     }
 
@@ -241,56 +275,31 @@ app.get('/ticket/:id', async (req, res) => {
       content: '';
       position: absolute;
       left: 0;
-      top: 8px;
+      top: 7px;
       width: 5px;
       height: 5px;
       border-radius: 50%;
       background: var(--green-mid);
     }
 
-    /* Divider */
-    .divider {
-      height: 1px;
-      background: var(--border);
-      margin: 0.875rem 0;
-    }
-
-    /* Werkzone */
-    .werkzone {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      margin-bottom: 0.875rem;
-    }
-
-    .werkzone-sectie {
-      padding: 1rem 1.25rem;
-    }
-
-    .werkzone-sectie + .werkzone-sectie {
+    /* Instructie-sectie: vastzittend onderaan linkerkolom */
+    .instructie-sectie {
+      flex-shrink: 0;
+      padding: 12px 16px;
       border-top: 1px solid var(--border);
-    }
-
-    .werkzone-label {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-xsoft);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 0.625rem;
+      background: var(--surface);
     }
 
     textarea {
       width: 100%;
       font-family: 'Inter', -apple-system, sans-serif;
-      font-size: 13.5px;
+      font-size: 13px;
       color: var(--text);
-      line-height: 1.65;
+      line-height: 1.6;
       border: 1.5px solid var(--border);
       border-radius: 7px;
-      padding: 0.75rem 0.875rem;
-      resize: vertical;
+      padding: 8px 10px;
+      resize: none;
       background: var(--bg);
       transition: border-color 0.15s;
     }
@@ -301,22 +310,62 @@ app.get('/ticket/:id', async (req, res) => {
       background: var(--surface);
     }
 
-    #instructie {
-      min-height: 68px;
-    }
-
-    #reply {
-      min-height: 220px;
-    }
+    #instructie { height: 62px; }
 
     .instructie-rij {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-top: 0.625rem;
+      margin-top: 8px;
     }
 
-    /* Knoppen */
+    /* ── Rechterkolom ── */
+    .col-right {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .concept-header {
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #reply {
+      flex: 1;
+      border: none;
+      border-radius: 0;
+      padding: 14px 16px;
+      background: var(--surface);
+      font-size: 13.5px;
+      line-height: 1.75;
+      resize: none;
+      height: 100%;
+    }
+
+    #reply:focus {
+      border: none;
+      background: var(--surface);
+    }
+
+    .actierij {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    /* ── Knoppen ── */
     .btn {
       display: inline-flex;
       align-items: center;
@@ -325,7 +374,7 @@ app.get('/ticket/:id', async (req, res) => {
       font-size: 13px;
       font-weight: 500;
       border-radius: 7px;
-      padding: 8px 14px;
+      padding: 7px 13px;
       cursor: pointer;
       border: 1.5px solid transparent;
       transition: background 0.12s, opacity 0.12s;
@@ -344,8 +393,8 @@ app.get('/ticket/:id', async (req, res) => {
     .btn-verstuur {
       background: var(--green-dark);
       color: #fff;
-      padding: 10px 20px;
-      font-size: 14px;
+      padding: 9px 18px;
+      font-size: 13.5px;
     }
     .btn-verstuur:hover:not(:disabled) { background: var(--green-mid); }
 
@@ -362,20 +411,13 @@ app.get('/ticket/:id', async (req, res) => {
       color: var(--text-xsoft);
     }
 
-    /* Actierij */
-    .actierij {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
     /* Feedback */
     .feedback {
       display: none;
-      padding: 12px 14px;
-      border-radius: 8px;
+      padding: 8px 14px;
+      border-radius: 7px;
       font-size: 13px;
-      margin-top: 0.75rem;
+      margin-left: auto;
     }
     .feedback-ok {
       background: var(--green-light);
@@ -390,8 +432,7 @@ app.get('/ticket/:id', async (req, res) => {
 
     /* Spinner */
     .spinner {
-      width: 13px;
-      height: 13px;
+      width: 13px; height: 13px;
       border: 2px solid rgba(255,255,255,0.3);
       border-top-color: #fff;
       border-radius: 50%;
@@ -403,86 +444,84 @@ app.get('/ticket/:id', async (req, res) => {
       border-top-color: var(--text);
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    @media (max-width: 480px) {
-      .header { flex-direction: column; align-items: flex-start; gap: 8px; }
-      .actierij { flex-direction: column; align-items: stretch; }
-      .btn-verstuur { justify-content: center; }
-    }
   </style>
 </head>
 <body>
-  <div class="layout">
+  <div class="app">
 
-    <div class="header">
-      <div>
-        <div class="ticket-ref">Ticket #${ticket.id}</div>
-        <div class="ticket-subject">${ticket.subject}</div>
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-ref">Ticket #${ticket.id}</div>
+        <div class="topbar-subject">${ticket.subject}</div>
       </div>
-      <div class="claude-badge">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="#6B6B65"/>
+      <div class="topbar-badge">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="rgba(255,255,255,0.7)"/>
         </svg>
         Concept door Claude
       </div>
     </div>
 
-    <!-- Ticket info -->
-    <div class="card">
-      <div class="card-label">Laatste bericht</div>
-      <div class="bericht-tekst">${laatsteBericht.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-      ${toonVertaling ? `
-      <div class="vertaling-blok">
-        <div class="vertaling-label">Vertaling</div>
-        <div class="vertaling-tekst">${vertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-      </div>` : ''}
-      ${heeftMeerdereReacties && samenvattingHtml ? `
-      <div class="divider"></div>
-      <div class="card-label">Gespreksoverzicht</div>
-      <ul class="samenvatting-lijst">${samenvattingHtml}</ul>
-      ` : ''}
-    </div>
+    <!-- Twee kolommen -->
+    <div class="columns">
 
-    <!-- Werkzone -->
-    <div class="werkzone">
+      <!-- Links: bericht + instructie -->
+      <div class="col-left">
 
-      <!-- Instructies -->
-      <div class="werkzone-sectie">
-        <div class="werkzone-label">Instructies voor Claude</div>
-        <textarea id="instructie" placeholder="Bijv: schrijf formeler, voeg levertijd toe, kortere reactie…"></textarea>
-        <div class="instructie-rij">
-          <button class="btn btn-aanpassen" onclick="aanpassen()" id="btn-aanpassen">
-            <span id="spinner-aanpassen" class="spinner spinner-dark"></span>
-            Pas concept aan
-          </button>
-          <span class="laden-tekst" id="laden">Claude past aan…</span>
+        <!-- Bericht (scrollt intern) -->
+        <div class="bericht-sectie">
+          <div class="section-label">Laatste bericht</div>
+          <div class="bericht-tekst">${laatsteBericht.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          ${toonVertaling ? `
+          <div class="vertaling-blok">
+            <div class="vertaling-label">Vertaling</div>
+            <div class="vertaling-tekst">${vertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          </div>` : ''}
+          ${heeftMeerdereReacties && samenvattingHtml ? `
+          <div class="divider"></div>
+          <div class="section-label">Gespreksoverzicht</div>
+          <ul class="samenvatting-lijst">${samenvattingHtml}</ul>
+          ` : ''}
         </div>
+
+        <!-- Instructie (vast onderaan) -->
+        <div class="instructie-sectie">
+          <div class="section-label">Instructie voor Claude</div>
+          <textarea id="instructie" placeholder="Bijv: formeler, kortere reactie, voeg levertijd toe…"></textarea>
+          <div class="instructie-rij">
+            <button class="btn btn-aanpassen" onclick="aanpassen()" id="btn-aanpassen">
+              <span id="spinner-aanpassen" class="spinner spinner-dark"></span>
+              Pas concept aan
+            </button>
+            <span class="laden-tekst" id="laden">Claude past aan…</span>
+          </div>
+        </div>
+
       </div>
 
-      <!-- Concept -->
-      <div class="werkzone-sectie">
-        <div class="werkzone-label">Concept antwoord</div>
-        <textarea id="reply">${conceptTekst}</textarea>
+      <!-- Rechts: concept + verzendknop -->
+      <div class="col-right">
+
+        <div class="concept-header">
+          <div class="section-label" style="margin:0">Concept antwoord</div>
+        </div>
+
+        <textarea id="reply" spellcheck="true">${conceptTekst}</textarea>
+
+        <div class="actierij">
+          <button class="btn btn-verstuur" onclick="verstuur()" id="btn-verstuur">
+            <span id="spinner-verstuur" class="spinner"></span>
+            Verstuur naar klant
+          </button>
+          <button class="btn btn-sla" onclick="sla()">Overslaan</button>
+          <div class="feedback feedback-ok" id="success">Antwoord verstuurd.</div>
+          <div class="feedback feedback-fout" id="error">Er ging iets mis. Probeer opnieuw.</div>
+        </div>
+
       </div>
 
     </div>
-
-    <!-- Acties -->
-    <div class="actierij">
-      <button class="btn btn-verstuur" onclick="verstuur()" id="btn-verstuur">
-        <span id="spinner-verstuur" class="spinner"></span>
-        Verstuur naar klant
-      </button>
-      <button class="btn btn-sla" onclick="sla()">Overslaan</button>
-    </div>
-
-    <div class="feedback feedback-ok" id="success">
-      Antwoord verstuurd naar de klant.
-    </div>
-    <div class="feedback feedback-fout" id="error">
-      Er ging iets mis. Probeer het opnieuw.
-    </div>
-
   </div>
 
   <script>
