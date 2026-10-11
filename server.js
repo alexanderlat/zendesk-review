@@ -247,7 +247,6 @@ app.get('/ticket/:id', async (req, res) => {
       font-size: 13px;
       color: #1e3a8a;
       line-height: 1.6;
-      font-style: italic;
     }
 
     .divider {
