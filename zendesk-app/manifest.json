@@ -1,0 +1,20 @@
+{
+  "name": "Claude Concept Review",
+  "author": {
+    "name": "Latour Tuinmeubelen",
+    "email": "info@latour-lith.nl",
+    "url": "https://latour-lith.nl"
+  },
+  "defaultLocale": "nl",
+  "private": true,
+  "location": {
+    "support": {
+      "ticket_sidebar": {
+        "url": "assets/index.html",
+        "flexible": true
+      }
+    }
+  },
+  "version": "1.0.0",
+  "frameworkVersion": "2.0"
+}
