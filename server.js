@@ -80,21 +80,26 @@ app.get('/ticket/:id', async (req, res) => {
   });
   const commentsData = await commentsResponse.json();
   const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
-  const heeftMeerdereReacties = publiciekeComments.length > 1;
+  const heeftMeerdereReacties = publiciekeComments.length > 3;
   const laatsteBericht = publiciekeComments.length > 0 ? publiciekeComments[publiciekeComments.length - 1].body || '' : ticket.description || '';
 
   const conceptTekst = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
 
-  // Alle Claude-calls tegelijk starten
-  const [vertaling, samenvatting, conceptVertalingRaw] = await Promise.all([
+  // Stap 1: taaldetectie + samenvatting parallel
+  const [vertaling, samenvatting] = await Promise.all([
     vertaalNaarNederlands(laatsteBericht),
-    heeftMeerdereReacties ? maakSamenvatting(publiciekeComments) : Promise.resolve(''),
-    conceptTekst ? vertaalNaarNederlands(conceptTekst) : Promise.resolve('NL')
+    heeftMeerdereReacties ? maakSamenvatting(publiciekeComments) : Promise.resolve('')
   ]);
 
   const toonVertaling = vertaling !== 'NL';
   const samenvattingHtml = samenvatting.split('\n').filter(r => r.trim()).map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
-  const conceptVertaling = (toonVertaling && conceptVertalingRaw !== 'NL') ? conceptVertalingRaw : '';
+
+  // Stap 2: conceptvertaling alleen als taal niet-NL is (voorkomt onnodige call bij NL tickets)
+  let conceptVertaling = '';
+  if (toonVertaling && conceptTekst) {
+    const cv = await vertaalNaarNederlands(conceptTekst);
+    if (cv !== 'NL') conceptVertaling = cv;
+  }
 
   res.send(`<!DOCTYPE html>
 <html lang="nl">
