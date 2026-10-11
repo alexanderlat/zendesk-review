@@ -61,8 +61,12 @@
         z-index: 9999;
         display: flex;
         flex-direction: column;
+        pointer-events: none;
         transition: transform 0.28s cubic-bezier(0.4,0,0.2,1),
                     opacity  0.28s cubic-bezier(0.4,0,0.2,1);
+      }
+      #${DRAWER_ID}.lr-open {
+        pointer-events: auto;
       }
 
       /* Rechts */
