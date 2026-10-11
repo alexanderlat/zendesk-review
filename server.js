@@ -509,7 +509,7 @@ app.get('/ticket/:id', async (req, res) => {
           ${toonVertaling ? `
           <div class="vertaling-blok">
             <div class="vertaling-label">Vertaling</div>
-            <div class="vertaling-tekst">${vertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            <div class="vertaling-tekst">${vertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</div>
           </div>` : ''}
           ${heeftMeerdereReacties && samenvattingHtml ? `
           <div class="divider"></div>
