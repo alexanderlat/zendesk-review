@@ -435,10 +435,21 @@
   // ── Drawer openen/sluiten ────────────────────────────────────────────────────
   function openDrawer(url, ticketId) {
     buildDrawer();
+
+    // Overlay opnieuw aanmaken als hij eerder verwijderd werd
+    let overlay = document.getElementById('latour-review-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'latour-review-overlay';
+      overlay.addEventListener('click', closeDrawer);
+      document.body.appendChild(overlay);
+    }
+    overlay.style.pointerEvents = '';
+    overlay.style.opacity = '';
+
     applyPosition(getPosition());
 
     const drawer   = document.getElementById(DRAWER_ID);
-    const overlay  = document.getElementById('latour-review-overlay');
     const iframe   = document.getElementById('latour-review-iframe');
     const subtitle = document.getElementById('latour-review-subtitle');
 
@@ -454,12 +465,17 @@
     const overlay = document.getElementById('latour-review-overlay');
     if (!drawer) return;
     drawer.classList.remove('lr-open');
-    overlay.classList.remove('lr-open');
-    // Zorg dat de overlay nooit klikken blijft blokkeren
-    overlay.style.pointerEvents = 'none';
+    if (overlay) {
+      overlay.classList.remove('lr-open');
+      overlay.style.pointerEvents = 'none';
+      overlay.style.opacity = '0';
+    }
     setTimeout(() => {
       const iframe = document.getElementById('latour-review-iframe');
       if (iframe && !drawer.classList.contains('lr-open')) iframe.src = '';
+      // Verwijder overlay volledig zodat hij nooit klikken kan blokkeren
+      const ov = document.getElementById('latour-review-overlay');
+      if (ov) ov.remove();
     }, 300);
   }
 
