@@ -83,20 +83,18 @@ app.get('/ticket/:id', async (req, res) => {
   const heeftMeerdereReacties = publiciekeComments.length > 1;
   const laatsteBericht = publiciekeComments.length > 0 ? publiciekeComments[publiciekeComments.length - 1].body || '' : ticket.description || '';
 
-  const vertaling = await vertaalNaarNederlands(laatsteBericht);
-  const toonVertaling = vertaling !== 'NL';
-
-  const samenvatting = heeftMeerdereReacties ? await maakSamenvatting(publiciekeComments) : '';
-  const samenvattingHtml = samenvatting.split('\n').filter(r => r.trim()).map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
-
   const conceptTekst = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
 
-  // Vertaal het concept als de taal niet-NL is
-  let conceptVertaling = '';
-  if (toonVertaling && conceptTekst) {
-    conceptVertaling = await vertaalNaarNederlands(conceptTekst);
-    if (conceptVertaling === 'NL') conceptVertaling = '';
-  }
+  // Alle Claude-calls tegelijk starten
+  const [vertaling, samenvatting, conceptVertalingRaw] = await Promise.all([
+    vertaalNaarNederlands(laatsteBericht),
+    heeftMeerdereReacties ? maakSamenvatting(publiciekeComments) : Promise.resolve(''),
+    conceptTekst ? vertaalNaarNederlands(conceptTekst) : Promise.resolve('NL')
+  ]);
+
+  const toonVertaling = vertaling !== 'NL';
+  const samenvattingHtml = samenvatting.split('\n').filter(r => r.trim()).map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
+  const conceptVertaling = (toonVertaling && conceptVertalingRaw !== 'NL') ? conceptVertalingRaw : '';
 
   res.send(`<!DOCTYPE html>
 <html lang="nl">
