@@ -29,29 +29,14 @@
     const style = document.createElement('style');
     style.id = 'latour-review-styles';
     style.textContent = `
-      /* Dim-laag via ::before — zit BINNEN het drawer element,
-         kan dus nooit klikken buiten het panel blokkeren */
-      #${DRAWER_ID}::before {
+      /* Dim-laag via ::before — alleen voor center positie */
+      #${DRAWER_ID}.lr-pos-center.lr-open::before {
         content: '';
         position: fixed;
         inset: 0;
         background: rgba(0,0,0,0.35);
         z-index: -1;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.25s;
-      }
-      /* Alleen zichtbaar + klikbaar als panel open én niet rechts/links
-         (bij side-panels wil je de dim alleen bij center) */
-      #${DRAWER_ID}.lr-pos-center.lr-open::before {
-        opacity: 1;
         pointer-events: auto;
-      }
-      /* Bij rechts/links: lichte dim zodat context bewaard blijft */
-      #${DRAWER_ID}.lr-pos-right.lr-open::before,
-      #${DRAWER_ID}.lr-pos-left.lr-open::before {
-        opacity: 0;
-        pointer-events: none;
       }
 
       /* ── Drawer basis ── */
@@ -372,8 +357,8 @@
     if (!drawer) return;
     drawer.classList.remove('lr-open');
     setTimeout(() => {
-      const iframe = document.getElementById('latour-review-iframe');
-      if (iframe && !drawer.classList.contains('lr-open')) iframe.src = '';
+      const d = document.getElementById(DRAWER_ID);
+      if (d && !d.classList.contains('lr-open')) d.remove();
     }, 300);
   }
 
