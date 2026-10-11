@@ -429,6 +429,13 @@ app.get('/ticket/:id', async (req, res) => {
     }
     .btn-sla:hover:not(:disabled) { background: var(--bg); }
 
+    .btn-kopieer {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--text-soft);
+    }
+    .btn-kopieer:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+
     .laden-tekst {
       display: none;
       font-size: 12px;
@@ -636,8 +643,15 @@ app.get('/ticket/:id', async (req, res) => {
             <span id="spinner-verstuur" class="spinner"></span>
             Verstuur naar klant
           </button>
+          <button class="btn btn-kopieer" onclick="kopieer()" id="btn-kopieer" title="Kopieer concept naar klembord">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            Kopieer
+          </button>
           <button class="btn btn-sla" onclick="sla()">Overslaan</button>
           <div class="feedback feedback-ok" id="success">Antwoord verstuurd.</div>
+          <div class="feedback feedback-ok" id="gekopieerd" style="display:none">✓ Gekopieerd</div>
           <div class="feedback feedback-fout" id="error">Er ging iets mis. Probeer opnieuw.</div>
         </div>
 
@@ -803,6 +817,16 @@ app.get('/ticket/:id', async (req, res) => {
         btn.disabled = false;
         btn.childNodes[btn.childNodes.length - 1].textContent = ' Verstuur naar klant';
       }
+    }
+
+    function kopieer() {
+      const tekst = document.getElementById('reply').value.trim();
+      if (!tekst) return;
+      navigator.clipboard.writeText(tekst).then(() => {
+        const el = document.getElementById('gekopieerd');
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 2000);
+      });
     }
 
     function sla() {
