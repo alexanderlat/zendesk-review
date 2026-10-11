@@ -87,131 +87,472 @@ app.get('/ticket/:id', async (req, res) => {
   const toonVertaling = vertaling !== 'NL';
 
   const samenvatting = heeftMeerdereReacties ? await maakSamenvatting(publiciekeComments) : '';
-  const samenvattingHtml = samenvatting.split('\n').map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
+  const samenvattingHtml = samenvatting.split('\n').filter(r => r.trim()).map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
+
+  const conceptTekst = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
 
   res.send(`<!DOCTYPE html>
 <html lang="nl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ticket review #${ticketId}</title>
+  <title>Ticket #${ticket.id} — Claude Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #111; padding: 2rem; }
-    .container { max-width: 700px; margin: 0 auto; }
-    h1 { font-size: 20px; font-weight: 600; margin-bottom: 1.5rem; }
-    .card { background: white; border-radius: 10px; border: 1px solid #e5e5e5; padding: 1.25rem; margin-bottom: 1rem; }
-    .label { font-size: 12px; color: #888; margin-bottom: 4px; }
-    .subject { font-size: 15px; font-weight: 600; margin-bottom: 0.75rem; }
-    .body { font-size: 14px; color: #444; line-height: 1.6; }
-    .badge { display: inline-block; font-size: 11px; background: #e8f0fe; color: #1a56db; border-radius: 20px; padding: 2px 10px; margin-bottom: 8px; }
-    textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 300px; line-height: 1.6; }
-    textarea:focus { outline: none; border-color: #888; }
-    .actions { display: flex; gap: 10px; margin-top: 1rem; }
-    button { padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid #ddd; background: white; }
-    .btn-primary { background: #111; color: white; border-color: transparent; }
-    .btn-danger { color: #c0392b; }
-    .success { display: none; margin-top: 1rem; padding: 12px; background: #f0fdf4; border-radius: 8px; color: #166534; font-size: 14px; }
-    .error { display: none; margin-top: 1rem; padding: 12px; background: #fef2f2; border-radius: 8px; color: #991b1b; font-size: 14px; }
-    .meta { display: flex; gap: 1.5rem; margin-bottom: 1rem; }
-    .meta-item { font-size: 12px; color: #888; }
-    .meta-item span { color: #111; font-weight: 500; }
-    .vertaling { background: #f0f5ff; border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.75rem; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green-dark: #1C3D2E;
+      --green-mid: #2D5C44;
+      --green-light: #E8F2EC;
+      --green-border: #C2DDC9;
+      --bg: #FAFAF8;
+      --surface: #FFFFFF;
+      --border: #E8E8E4;
+      --text: #1A1A18;
+      --text-soft: #6B6B65;
+      --text-xsoft: #9E9E96;
+      --blue-light: #EEF3FF;
+      --blue-border: #C5D4F5;
+      --blue-text: #2B4EAB;
+      --red-light: #FEF2F2;
+      --red-text: #991B1B;
+    }
+
+    html { font-size: 14px; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    .layout {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 1.75rem 1.25rem 3rem;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+
+    .ticket-ref {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-xsoft);
+      letter-spacing: 0.02em;
+    }
+
+    .ticket-subject {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text);
+      margin-top: 2px;
+    }
+
+    .claude-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-soft);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      white-space: nowrap;
+    }
+
+    .claude-badge svg { flex-shrink: 0; }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.125rem 1.25rem;
+      margin-bottom: 0.875rem;
+    }
+
+    .card-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-xsoft);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.5rem;
+    }
+
+    .bericht-tekst {
+      font-size: 13.5px;
+      color: var(--text);
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    .vertaling-blok {
+      margin-top: 0.875rem;
+      padding: 0.75rem 1rem;
+      background: var(--blue-light);
+      border: 1px solid var(--blue-border);
+      border-radius: 7px;
+    }
+
+    .vertaling-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--blue-text);
+      margin-bottom: 4px;
+    }
+
+    .vertaling-tekst {
+      font-size: 13px;
+      color: #1e3a8a;
+      line-height: 1.6;
+      font-style: italic;
+    }
+
+    .samenvatting-lijst {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .samenvatting-lijst li {
+      font-size: 13.5px;
+      color: var(--text);
+      line-height: 1.55;
+      padding-left: 1rem;
+      position: relative;
+    }
+
+    .samenvatting-lijst li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--green-mid);
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 0.875rem 0;
+    }
+
+    /* Werkzone */
+    .werkzone {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 0.875rem;
+    }
+
+    .werkzone-sectie {
+      padding: 1rem 1.25rem;
+    }
+
+    .werkzone-sectie + .werkzone-sectie {
+      border-top: 1px solid var(--border);
+    }
+
+    .werkzone-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-xsoft);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.625rem;
+    }
+
+    textarea {
+      width: 100%;
+      font-family: 'Inter', -apple-system, sans-serif;
+      font-size: 13.5px;
+      color: var(--text);
+      line-height: 1.65;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      padding: 0.75rem 0.875rem;
+      resize: vertical;
+      background: var(--bg);
+      transition: border-color 0.15s;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--green-mid);
+      background: var(--surface);
+    }
+
+    #instructie {
+      min-height: 68px;
+    }
+
+    #reply {
+      min-height: 220px;
+    }
+
+    .instructie-rij {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 0.625rem;
+    }
+
+    /* Knoppen */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 7px;
+      padding: 8px 14px;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: background 0.12s, opacity 0.12s;
+      white-space: nowrap;
+    }
+
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-aanpassen {
+      background: var(--surface);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .btn-aanpassen:hover:not(:disabled) { background: var(--bg); }
+
+    .btn-verstuur {
+      background: var(--green-dark);
+      color: #fff;
+      padding: 10px 20px;
+      font-size: 14px;
+    }
+    .btn-verstuur:hover:not(:disabled) { background: var(--green-mid); }
+
+    .btn-sla {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--text-soft);
+    }
+    .btn-sla:hover:not(:disabled) { background: var(--bg); }
+
+    .laden-tekst {
+      display: none;
+      font-size: 12px;
+      color: var(--text-xsoft);
+    }
+
+    /* Actierij */
+    .actierij {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Feedback */
+    .feedback {
+      display: none;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-top: 0.75rem;
+    }
+    .feedback-ok {
+      background: var(--green-light);
+      border: 1px solid var(--green-border);
+      color: var(--green-dark);
+      font-weight: 500;
+    }
+    .feedback-fout {
+      background: var(--red-light);
+      color: var(--red-text);
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 13px;
+      height: 13px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: none;
+    }
+    .spinner-dark {
+      border-color: rgba(0,0,0,0.15);
+      border-top-color: var(--text);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 480px) {
+      .header { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .actierij { flex-direction: column; align-items: stretch; }
+      .btn-verstuur { justify-content: center; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Ticket review</h1>
-    <div class="card">
-      <div class="meta">
-        <div class="meta-item">Ticket <span>#${ticket.id}</span></div>
-        <div class="meta-item">Van <span>${ticket.requester_id}</span></div>
+  <div class="layout">
+
+    <div class="header">
+      <div>
+        <div class="ticket-ref">Ticket #${ticket.id}</div>
+        <div class="ticket-subject">${ticket.subject}</div>
       </div>
-      <div class="label">Onderwerp</div>
-      <div class="subject">${ticket.subject}</div>
-      <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 0.75rem 0;">
-      <div class="label">Laatste bericht</div>
-      <div class="body">${laatsteBericht}</div>
+      <div class="claude-badge">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="#6B6B65"/>
+        </svg>
+        Concept door Claude
+      </div>
+    </div>
+
+    <!-- Ticket info -->
+    <div class="card">
+      <div class="card-label">Laatste bericht</div>
+      <div class="bericht-tekst">${laatsteBericht.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
       ${toonVertaling ? `
-      <div class="vertaling">
-        <div class="label" style="color: #1a56db; margin-bottom: 6px;">Nederlandse vertaling</div>
-        <div class="body" style="font-style: italic;">${vertaling}</div>
+      <div class="vertaling-blok">
+        <div class="vertaling-label">Vertaling</div>
+        <div class="vertaling-tekst">${vertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
       </div>` : ''}
-      ${heeftMeerdereReacties ? `
-      <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 0.75rem 0;">
-      <div class="label" style="margin-bottom: 6px;">Samenvatting gesprek</div>
-      <ul style="font-size: 14px; color: #444; line-height: 1.8; padding-left: 1.2rem;">
-        ${samenvattingHtml}
-      </ul>` : ''}
+      ${heeftMeerdereReacties && samenvattingHtml ? `
+      <div class="divider"></div>
+      <div class="card-label">Gespreksoverzicht</div>
+      <ul class="samenvatting-lijst">${samenvattingHtml}</ul>
+      ` : ''}
     </div>
 
-    <div class="badge">Gegenereerd door Claude</div>
-    <textarea id="reply">${decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '')}</textarea>
+    <!-- Werkzone -->
+    <div class="werkzone">
 
-    <div style="margin-top: 0.75rem;">
-      <div class="label" style="margin-bottom: 6px;">Instructies voor Claude</div>
-      <textarea id="instructie" placeholder="Bijv: Maak het korter, voeg levertijd toe, schrijf formeler..." style="width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 60px; line-height: 1.6;"></textarea>
-      <button onclick="aanpassen()" style="margin-top: 8px; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid #ddd; background: white;">Aanpassen met Claude ↻</button>
-      <span id="laden" style="display:none; font-size: 13px; color: #888; margin-left: 10px;">Claude denkt na...</span>
+      <!-- Instructies -->
+      <div class="werkzone-sectie">
+        <div class="werkzone-label">Instructies voor Claude</div>
+        <textarea id="instructie" placeholder="Bijv: schrijf formeler, voeg levertijd toe, kortere reactie…"></textarea>
+        <div class="instructie-rij">
+          <button class="btn btn-aanpassen" onclick="aanpassen()" id="btn-aanpassen">
+            <span id="spinner-aanpassen" class="spinner spinner-dark"></span>
+            Pas concept aan
+          </button>
+          <span class="laden-tekst" id="laden">Claude past aan…</span>
+        </div>
+      </div>
+
+      <!-- Concept -->
+      <div class="werkzone-sectie">
+        <div class="werkzone-label">Concept antwoord</div>
+        <textarea id="reply">${conceptTekst}</textarea>
+      </div>
+
     </div>
 
-    <div class="actions">
-      <button class="btn-primary" onclick="verstuur()">Goedkeuren & versturen</button>
-      <button onclick="sla()">Overslaan</button>
+    <!-- Acties -->
+    <div class="actierij">
+      <button class="btn btn-verstuur" onclick="verstuur()" id="btn-verstuur">
+        <span id="spinner-verstuur" class="spinner"></span>
+        Verstuur naar klant
+      </button>
+      <button class="btn btn-sla" onclick="sla()">Overslaan</button>
     </div>
-    <div class="success" id="success">Antwoord verstuurd naar de klant!</div>
-    <div class="error" id="error">Er ging iets mis. Probeer het opnieuw.</div>
+
+    <div class="feedback feedback-ok" id="success">
+      Antwoord verstuurd naar de klant.
+    </div>
+    <div class="feedback feedback-fout" id="error">
+      Er ging iets mis. Probeer het opnieuw.
+    </div>
+
   </div>
 
   <script>
     async function aanpassen() {
-      const instructie = document.getElementById('instructie').value;
+      const instructie = document.getElementById('instructie').value.trim();
       const huidigAntwoord = document.getElementById('reply').value;
       if (!instructie) {
-        alert('Vul eerst een instructie in.');
+        document.getElementById('instructie').focus();
         return;
       }
-      document.getElementById('laden').style.display = 'inline';
-      const res = await fetch('/aanpassen', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ticketId: '${ticketId}',
-          huidigAntwoord: huidigAntwoord,
-          instructie: instructie
-        })
-      });
-      const data = await res.json();
-      document.getElementById('laden').style.display = 'none';
-      if (data.antwoord) {
-        document.getElementById('reply').value = data.antwoord;
-        document.getElementById('instructie').value = '';
-      }
+      const btn = document.getElementById('btn-aanpassen');
+      const spinner = document.getElementById('spinner-aanpassen');
+      const laden = document.getElementById('laden');
+      btn.disabled = true;
+      spinner.style.display = 'inline-block';
+      laden.style.display = 'inline';
+
+      try {
+        const res = await fetch('/aanpassen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ticketId: '${ticketId}',
+            huidigAntwoord: huidigAntwoord,
+            instructie: instructie
+          })
+        });
+        const data = await res.json();
+        if (data.antwoord) {
+          document.getElementById('reply').value = data.antwoord;
+          document.getElementById('instructie').value = '';
+        }
+      } catch(e) {}
+
+      btn.disabled = false;
+      spinner.style.display = 'none';
+      laden.style.display = 'none';
     }
 
     async function verstuur() {
-      const knop = document.querySelector('.btn-primary');
-      knop.disabled = true;
-      knop.textContent = 'Bezig met versturen...';
-      const reply = document.getElementById('reply').value;
+      const reply = document.getElementById('reply').value.trim();
+      if (!reply) return;
+
+      const btn = document.getElementById('btn-verstuur');
+      const spinner = document.getElementById('spinner-verstuur');
+      btn.disabled = true;
+      spinner.style.display = 'inline-block';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Bezig…';
+
       const res = await fetch('/reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticketId: '${ticketId}', reply, agentId: '${agentId}' })
       });
+
+      spinner.style.display = 'none';
+
       if (res.ok) {
         document.getElementById('success').style.display = 'block';
-        document.querySelectorAll('button').forEach(b => b.disabled = true);
+        document.querySelectorAll('.btn').forEach(b => b.disabled = true);
       } else {
         document.getElementById('error').style.display = 'block';
-        knop.disabled = false;
-        knop.textContent = 'Goedkeuren & versturen';
+        btn.disabled = false;
+        btn.childNodes[btn.childNodes.length - 1].textContent = ' Verstuur naar klant';
       }
     }
 
     function sla() {
-      if (confirm('Weet je zeker dat je dit ticket wilt overslaan?')) {
-        document.querySelectorAll('button').forEach(b => b.disabled = true);
+      if (confirm('Dit ticket overslaan?')) {
+        document.querySelectorAll('.btn').forEach(b => b.disabled = true);
       }
     }
   </script>
