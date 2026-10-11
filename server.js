@@ -107,7 +107,9 @@ app.get('/ticket/:id', async (req, res) => {
   const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
   const heeftMeerdereReacties = publiciekeComments.length > 3;
   const laatsteBericht = publiciekeComments.length > 0 ? publiciekeComments[publiciekeComments.length - 1].body || '' : ticket.description || '';
-  const conceptTekst = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
+  const conceptRaw = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
+  const needsInput = conceptRaw.trim() === 'NEEDS_INPUT' || conceptRaw.trim() === '';
+  const conceptTekst = needsInput ? '' : conceptRaw;
 
   // Geen Claude-calls meer hier — die gebeuren async vanuit de browser
   const toonVertaling = false; // wordt client-side bepaald
@@ -460,6 +462,49 @@ app.get('/ticket/:id', async (req, res) => {
       opacity: 0.7;
     }
 
+    /* Needs-input modus */
+    .needs-input-modus {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+      gap: 16px;
+      text-align: center;
+      background: var(--surface);
+    }
+    .needs-input-icoon {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #FEF9EC;
+      border: 1.5px solid #F5D76E;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+    .needs-input-titel {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .needs-input-omschrijving {
+      font-size: 13px;
+      color: var(--text-soft);
+      max-width: 300px;
+      line-height: 1.6;
+    }
+    .btn-genereer {
+      background: var(--green-dark);
+      color: #fff;
+      padding: 10px 20px;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .btn-genereer:hover:not(:disabled) { background: var(--green-mid); }
+
     /* Feedback */
     .feedback {
       display: none;
@@ -565,14 +610,28 @@ app.get('/ticket/:id', async (req, res) => {
           <div class="section-label" style="margin:0">Concept antwoord</div>
         </div>
 
+        ${needsInput ? `
+        <!-- Needs-input modus -->
+        <div class="needs-input-modus" id="needs-input-modus">
+          <div class="needs-input-icoon">💬</div>
+          <div class="needs-input-titel">Extra context nodig</div>
+          <div class="needs-input-omschrijving">Dit ticket bevat te weinig informatie om automatisch een concept te maken. Voeg links een instructie toe en klik op de knop om een concept te genereren.</div>
+          <button class="btn btn-genereer" onclick="genereerConcept()" id="btn-genereer">
+            <span id="spinner-genereer" class="spinner"></span>
+            Genereer concept
+          </button>
+        </div>
+        <textarea id="reply" spellcheck="true" style="display:none"></textarea>
+        ` : `
         <textarea id="reply" spellcheck="true">${conceptTekst}</textarea>
+        `}
 
         <div class="concept-vertaling" id="concept-vertaling-blok" style="display:none">
           <div class="concept-vertaling-label">Vertaling concept (NL)</div>
           <div class="concept-vertaling-tekst" id="concept-vertaling-tekst"></div>
         </div>
 
-        <div class="actierij">
+        <div class="actierij" id="actierij" ${needsInput ? 'style="display:none"' : ''}>
           <button class="btn btn-verstuur" onclick="verstuur()" id="btn-verstuur">
             <span id="spinner-verstuur" class="spinner"></span>
             Verstuur naar klant
@@ -644,6 +703,42 @@ app.get('/ticket/:id', async (req, res) => {
 
     // Start async laden zodra pagina klaar is
     document.addEventListener('DOMContentLoaded', laadAsync);
+
+    async function genereerConcept() {
+      const instructie = document.getElementById('instructie').value.trim();
+      if (!instructie) {
+        document.getElementById('instructie').focus();
+        document.getElementById('instructie').placeholder = 'Vul eerst een instructie in…';
+        return;
+      }
+      const btn = document.getElementById('btn-genereer');
+      const spinner = document.getElementById('spinner-genereer');
+      btn.disabled = true;
+      spinner.style.display = 'inline-block';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Genereren…';
+
+      try {
+        const res = await fetch('/genereer-concept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticketId: '${ticketId}', instructie })
+        });
+        const data = await res.json();
+        if (data.antwoord) {
+          // Wissel naar normale modus
+          document.getElementById('needs-input-modus').style.display = 'none';
+          const reply = document.getElementById('reply');
+          reply.value = data.antwoord;
+          reply.style.display = 'block';
+          document.getElementById('actierij').style.display = 'flex';
+          document.getElementById('instructie').value = '';
+          vertaalConcept(data.antwoord);
+        }
+      } catch(e) {}
+
+      btn.disabled = false;
+      spinner.style.display = 'none';
+    }
 
     async function aanpassen() {
       const instructie = document.getElementById('instructie').value.trim();
@@ -725,6 +820,49 @@ app.post('/vertaal-concept', async (req, res) => {
   if (!tekst) return res.json({ vertaling: '' });
   const vertaling = await vertaalNaarNederlands(tekst);
   res.json({ vertaling: vertaling === 'NL' ? '' : vertaling });
+});
+
+app.post('/genereer-concept', async (req, res) => {
+  const { ticketId, instructie } = req.body;
+
+  const [ticketResp, commentsResp] = await Promise.all([
+    fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+    }),
+    fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments.json`, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+    })
+  ]);
+
+  const ticketData = await ticketResp.json();
+  const commentsData = await commentsResp.json();
+  const ticket = ticketData.ticket;
+  const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
+  const gesprek = publiciekeComments.map((c, i) => {
+    const rol = i === 0 ? 'Klant' : (c.via && c.via.channel === 'web' ? 'Medewerker' : 'Klant');
+    return rol + ': ' + (c.body || '');
+  }).join('\n\n');
+
+  const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-5-5',
+      max_tokens: 2000,
+      messages: [{
+        role: 'user',
+        content: `Je bent een professionele medewerker van Latour Tuinmeubelen. Stel een antwoord op voor onderstaand ticket.\n\nOnderwerp: ${ticket.subject}\n\nGesprek:\n${gesprek}\n\nExtra context van de medewerker: ${instructie}\n\nGeef alleen het antwoord zelf terug, geen uitleg, geen markdown, geen afsluiting.`
+      }]
+    })
+  });
+
+  const claudeData = await claudeResponse.json();
+  const antwoord = claudeData.content[0].text;
+  res.json({ antwoord });
 });
 
 app.post('/aanpassen', async (req, res) => {
