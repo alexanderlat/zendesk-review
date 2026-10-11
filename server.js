@@ -820,13 +820,34 @@ app.get('/ticket/:id', async (req, res) => {
     }
 
     function kopieer() {
-      const tekst = document.getElementById('reply').value.trim();
+      const textarea = document.getElementById('reply');
+      const tekst = textarea.value.trim();
       if (!tekst) return;
-      navigator.clipboard.writeText(tekst).then(() => {
+
+      // Probeer moderne clipboard API
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(tekst).then(toonGekopieerd).catch(fallbackKopieer);
+      } else {
+        fallbackKopieer();
+      }
+
+      function fallbackKopieer() {
+        // Selecteer de textarea en kopieer via execCommand
+        textarea.select();
+        textarea.setSelectionRange(0, 99999);
+        try {
+          document.execCommand('copy');
+          toonGekopieerd();
+        } catch(e) {}
+        // Deselecteer
+        window.getSelection && window.getSelection().removeAllRanges();
+      }
+
+      function toonGekopieerd() {
         const el = document.getElementById('gekopieerd');
         el.style.display = 'block';
         setTimeout(() => { el.style.display = 'none'; }, 2000);
-      });
+      }
     }
 
     function sla() {
