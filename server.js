@@ -17,7 +17,7 @@ async function vertaalNaarNederlands(tekst) {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5-5',
       max_tokens: 1000,
       messages: [{
         role: 'user',
@@ -43,7 +43,7 @@ async function maakSamenvatting(comments) {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5-5',
       max_tokens: 500,
       messages: [{
         role: 'user',
@@ -617,7 +617,7 @@ app.post('/aanpassen', async (req, res) => {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5-5',
       max_tokens: 1000,
       messages: [{
         role: 'user',
