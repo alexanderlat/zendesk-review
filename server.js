@@ -55,16 +55,47 @@ async function maakSamenvatting(comments) {
   return data.content[0].text.trim();
 }
 
+// Async endpoints voor vertaling en samenvatting (worden client-side aangeroepen)
+app.get('/async/vertaal/:id', async (req, res) => {
+  const ticketId = req.params.id;
+  const commentsResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments.json`, {
+    headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+  });
+  const commentsData = await commentsResponse.json();
+  const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
+  const laatsteBericht = publiciekeComments.length > 0 ? publiciekeComments[publiciekeComments.length - 1].body || '' : '';
+  if (!laatsteBericht) return res.json({ vertaling: null });
+  const vertaling = await vertaalNaarNederlands(laatsteBericht);
+  res.json({ vertaling: vertaling === 'NL' ? null : vertaling });
+});
+
+app.get('/async/samenvatting/:id', async (req, res) => {
+  const ticketId = req.params.id;
+  const commentsResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments.json`, {
+    headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+  });
+  const commentsData = await commentsResponse.json();
+  const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
+  if (publiciekeComments.length <= 3) return res.json({ samenvatting: null });
+  const samenvatting = await maakSamenvatting(publiciekeComments);
+  res.json({ samenvatting });
+});
+
 app.get('/ticket/:id', async (req, res) => {
   const ticketId = req.params.id;
   const agentId = req.query.agent_id || '';
 
-  const response = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
-    headers: {
-      'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
-    }
-  });
-  const data = await response.json();
+  // Ticket + comments parallel ophalen
+  const [ticketResp, commentsResp] = await Promise.all([
+    fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+    }),
+    fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments.json`, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+    })
+  ]);
+
+  const data = await ticketResp.json();
   if (!data.ticket) {
     return res.status(500).send(`
       <h2 style="font-family:sans-serif;padding:2rem">Fout bij ophalen ticket</h2>
@@ -72,34 +103,16 @@ app.get('/ticket/:id', async (req, res) => {
     `);
   }
   const ticket = data.ticket;
-
-  const commentsResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments.json`, {
-    headers: {
-      'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
-    }
-  });
-  const commentsData = await commentsResponse.json();
+  const commentsData = await commentsResp.json();
   const publiciekeComments = (commentsData.comments || []).filter(c => c.public);
   const heeftMeerdereReacties = publiciekeComments.length > 3;
   const laatsteBericht = publiciekeComments.length > 0 ? publiciekeComments[publiciekeComments.length - 1].body || '' : ticket.description || '';
-
   const conceptTekst = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
 
-  // Stap 1: taaldetectie + samenvatting parallel
-  const [vertaling, samenvatting] = await Promise.all([
-    vertaalNaarNederlands(laatsteBericht),
-    heeftMeerdereReacties ? maakSamenvatting(publiciekeComments) : Promise.resolve('')
-  ]);
-
-  const toonVertaling = vertaling !== 'NL';
-  const samenvattingHtml = samenvatting.split('\n').filter(r => r.trim()).map(r => `<li>${r.replace(/^- /, '')}</li>`).join('');
-
-  // Stap 2: conceptvertaling alleen als taal niet-NL is (voorkomt onnodige call bij NL tickets)
-  let conceptVertaling = '';
-  if (toonVertaling && conceptTekst) {
-    const cv = await vertaalNaarNederlands(conceptTekst);
-    if (cv !== 'NL') conceptVertaling = cv;
-  }
+  // Geen Claude-calls meer hier — die gebeuren async vanuit de browser
+  const toonVertaling = false; // wordt client-side bepaald
+  const samenvattingHtml = '';
+  const conceptVertaling = '';
 
   res.send(`<!DOCTYPE html>
 <html lang="nl">
@@ -514,11 +527,20 @@ app.get('/ticket/:id', async (req, res) => {
             <div class="vertaling-label">Vertaling</div>
             <div class="vertaling-tekst">${vertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</div>
           </div>` : ''}
-          ${heeftMeerdereReacties && samenvattingHtml ? `
-          <div class="divider"></div>
-          <div class="section-label">Gespreksoverzicht</div>
-          <ul class="samenvatting-lijst">${samenvattingHtml}</ul>
-          ` : ''}
+          <!-- Vertaling: asynchroon geladen -->
+          <div id="vertaling-blok" style="display:none">
+            <div class="vertaling-blok">
+              <div class="vertaling-label">Vertaling</div>
+              <div class="vertaling-tekst" id="vertaling-tekst"></div>
+            </div>
+          </div>
+
+          <!-- Samenvatting: asynchroon geladen -->
+          <div id="samenvatting-blok" style="display:none">
+            <div class="divider"></div>
+            <div class="section-label">Gespreksoverzicht</div>
+            <ul class="samenvatting-lijst" id="samenvatting-lijst"></ul>
+          </div>
         </div>
 
         <!-- Instructie (vast onderaan) -->
@@ -545,11 +567,10 @@ app.get('/ticket/:id', async (req, res) => {
 
         <textarea id="reply" spellcheck="true">${conceptTekst}</textarea>
 
-        ${toonVertaling ? `
-        <div class="concept-vertaling" id="concept-vertaling-blok" ${conceptVertaling ? '' : 'style="display:none"'}>
+        <div class="concept-vertaling" id="concept-vertaling-blok" style="display:none">
           <div class="concept-vertaling-label">Vertaling concept (NL)</div>
-          <div class="concept-vertaling-tekst" id="concept-vertaling-tekst">${conceptVertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-        </div>` : ''}
+          <div class="concept-vertaling-tekst" id="concept-vertaling-tekst"></div>
+        </div>
 
         <div class="actierij">
           <button class="btn btn-verstuur" onclick="verstuur()" id="btn-verstuur">
@@ -567,7 +588,40 @@ app.get('/ticket/:id', async (req, res) => {
   </div>
 
   <script>
+    const TICKET_ID = '${ticketId}';
+    let isNietNederlands = false;
+
+    // Laad vertaling + samenvatting asynchroon na pageload
+    async function laadAsync() {
+      // Vertaling bericht
+      try {
+        const r = await fetch('/async/vertaal/' + TICKET_ID);
+        const d = await r.json();
+        if (d.vertaling) {
+          isNietNederlands = true;
+          document.getElementById('vertaling-tekst').innerHTML = d.vertaling.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
+          document.getElementById('vertaling-blok').style.display = 'block';
+          // Vertaal ook het concept als het er al is
+          const concept = document.getElementById('reply').value;
+          if (concept) vertaalConcept(concept);
+        }
+      } catch(e) {}
+
+      // Samenvatting
+      try {
+        const r = await fetch('/async/samenvatting/' + TICKET_ID);
+        const d = await r.json();
+        if (d.samenvatting) {
+          const items = d.samenvatting.split('\\n').filter(s => s.trim());
+          const html = items.map(s => '<li>' + s.replace(/^- /, '') + '</li>').join('');
+          document.getElementById('samenvatting-lijst').innerHTML = html;
+          document.getElementById('samenvatting-blok').style.display = 'block';
+        }
+      } catch(e) {}
+    }
+
     async function vertaalConcept(tekst) {
+      if (!isNietNederlands) return;
       const blok = document.getElementById('concept-vertaling-blok');
       const el = document.getElementById('concept-vertaling-tekst');
       if (!blok || !el) return;
@@ -581,12 +635,15 @@ app.get('/ticket/:id', async (req, res) => {
         });
         const data = await res.json();
         if (data.vertaling) {
-          el.textContent = data.vertaling;
+          el.innerHTML = data.vertaling.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
         } else {
           blok.style.display = 'none';
         }
       } catch(e) { blok.style.display = 'none'; }
     }
+
+    // Start async laden zodra pagina klaar is
+    document.addEventListener('DOMContentLoaded', laadAsync);
 
     async function aanpassen() {
       const instructie = document.getElementById('instructie').value.trim();
