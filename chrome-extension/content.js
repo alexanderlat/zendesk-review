@@ -455,6 +455,8 @@
     if (!drawer) return;
     drawer.classList.remove('lr-open');
     overlay.classList.remove('lr-open');
+    // Zorg dat de overlay nooit klikken blijft blokkeren
+    overlay.style.pointerEvents = 'none';
     setTimeout(() => {
       const iframe = document.getElementById('latour-review-iframe');
       if (iframe && !drawer.classList.contains('lr-open')) iframe.src = '';
