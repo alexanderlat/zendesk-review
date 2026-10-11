@@ -21,7 +21,7 @@ async function vertaalNaarNederlands(tekst) {
       max_tokens: 1000,
       messages: [{
         role: 'user',
-        content: 'Detecteer de taal van onderstaande tekst. Als de taal Nederlands is, antwoord dan alleen met het woord "NL". Als de taal niet Nederlands is, vertaal de tekst dan naar Nederlands en geef alleen de vertaling terug, zonder uitleg of toevoeging.\n\nTekst:\n' + tekst
+        content: 'Detecteer de taal van onderstaande tekst. Als de taal Nederlands is, antwoord dan alleen met het woord "NL". Als de taal niet Nederlands is, vertaal de tekst dan naar Nederlands en geef alleen de vertaling terug, zonder uitleg of toevoeging. Bewaar alle regelafbrekingen en alinea-indeling van de originele tekst exact zoals ze zijn.\n\nTekst:\n' + tekst
       }]
     })
   });
