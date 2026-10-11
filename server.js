@@ -91,6 +91,13 @@ app.get('/ticket/:id', async (req, res) => {
 
   const conceptTekst = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
 
+  // Vertaal het concept als de taal niet-NL is
+  let conceptVertaling = '';
+  if (toonVertaling && conceptTekst) {
+    conceptVertaling = await vertaalNaarNederlands(conceptTekst);
+    if (conceptVertaling === 'NL') conceptVertaling = '';
+  }
+
   res.send(`<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -410,6 +417,33 @@ app.get('/ticket/:id', async (req, res) => {
       color: var(--text-xsoft);
     }
 
+    /* Concept vertaling */
+    .concept-vertaling {
+      padding: 10px 16px;
+      background: var(--blue-light);
+      border-top: 1px solid var(--blue-border);
+      flex-shrink: 0;
+    }
+    .concept-vertaling-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--blue-text);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    .concept-vertaling-tekst {
+      font-size: 13px;
+      color: #1e3a8a;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+    .concept-vertaling-laden {
+      font-size: 12px;
+      color: var(--blue-text);
+      opacity: 0.7;
+    }
+
     /* Feedback */
     .feedback {
       display: none;
@@ -508,6 +542,12 @@ app.get('/ticket/:id', async (req, res) => {
 
         <textarea id="reply" spellcheck="true">${conceptTekst}</textarea>
 
+        ${toonVertaling ? `
+        <div class="concept-vertaling" id="concept-vertaling-blok" ${conceptVertaling ? '' : 'style="display:none"'}>
+          <div class="concept-vertaling-label">Vertaling concept (NL)</div>
+          <div class="concept-vertaling-tekst" id="concept-vertaling-tekst">${conceptVertaling.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </div>` : ''}
+
         <div class="actierij">
           <button class="btn btn-verstuur" onclick="verstuur()" id="btn-verstuur">
             <span id="spinner-verstuur" class="spinner"></span>
@@ -524,6 +564,27 @@ app.get('/ticket/:id', async (req, res) => {
   </div>
 
   <script>
+    async function vertaalConcept(tekst) {
+      const blok = document.getElementById('concept-vertaling-blok');
+      const el = document.getElementById('concept-vertaling-tekst');
+      if (!blok || !el) return;
+      blok.style.display = 'block';
+      el.textContent = 'Vertaling laden…';
+      try {
+        const res = await fetch('/vertaal-concept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tekst })
+        });
+        const data = await res.json();
+        if (data.vertaling) {
+          el.textContent = data.vertaling;
+        } else {
+          blok.style.display = 'none';
+        }
+      } catch(e) { blok.style.display = 'none'; }
+    }
+
     async function aanpassen() {
       const instructie = document.getElementById('instructie').value.trim();
       const huidigAntwoord = document.getElementById('reply').value;
@@ -552,6 +613,7 @@ app.get('/ticket/:id', async (req, res) => {
         if (data.antwoord) {
           document.getElementById('reply').value = data.antwoord;
           document.getElementById('instructie').value = '';
+          vertaalConcept(data.antwoord);
         }
       } catch(e) {}
 
@@ -596,6 +658,13 @@ app.get('/ticket/:id', async (req, res) => {
   </script>
 </body>
 </html>`);
+});
+
+app.post('/vertaal-concept', async (req, res) => {
+  const { tekst } = req.body;
+  if (!tekst) return res.json({ vertaling: '' });
+  const vertaling = await vertaalNaarNederlands(tekst);
+  res.json({ vertaling: vertaling === 'NL' ? '' : vertaling });
 });
 
 app.post('/aanpassen', async (req, res) => {
