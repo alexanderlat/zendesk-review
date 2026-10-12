@@ -363,26 +363,33 @@
   }
 
   // ── Ingelogde Zendesk-gebruiker ophalen ──────────────────────────────────────
-  function getLoggedInAgentId() {
-    // Methode 1: window.currentUser (Zendesk zet dit globaal)
-    if (window.currentUser && window.currentUser.id) {
-      return String(window.currentUser.id);
-    }
-    // Methode 2: meta-tag
-    const meta = document.querySelector('meta[name="current-user-id"]');
-    if (meta && meta.content) return meta.content;
-    // Methode 3: data-attribuut op body of html
-    const bodyId = document.body.dataset.currentUserId || document.documentElement.dataset.currentUserId;
-    if (bodyId) return bodyId;
-    // Fallback: geen id gevonden
+  // Cache zodat we niet bij elke klik een API-call doen
+  let _cachedAgentId = null;
+
+  async function fetchLoggedInAgentId() {
+    if (_cachedAgentId) return _cachedAgentId;
+
+    try {
+      // Haal het subdomein op uit de huidige URL (bijv. latour-lith.zendesk.com)
+      const subdomain = location.hostname; // al op *.zendesk.com
+      const response = await fetch(`https://${subdomain}/api/v2/users/me.json`, {
+        credentials: 'include' // gebruik de bestaande Zendesk-sessie
+      });
+      if (response.ok) {
+        const data = await response.json();
+        _cachedAgentId = String(data.user.id);
+        return _cachedAgentId;
+      }
+    } catch(_) {}
+
     return '';
   }
 
   // ── URL: vervang agent_id door ingelogde gebruiker ───────────────────────────
-  function injectAgentId(href) {
+  async function injectAgentId(href) {
     try {
       const url = new URL(href);
-      const agentId = getLoggedInAgentId();
+      const agentId = await fetchLoggedInAgentId();
       if (agentId) url.searchParams.set('agent_id', agentId);
       return url.toString();
     } catch(_) {
@@ -411,11 +418,11 @@
         </svg>
         Bekijk concept
       `;
-      btn.addEventListener('click', e => {
+      btn.addEventListener('click', async e => {
         e.preventDefault();
         e.stopPropagation();
         // Vervang agent_id in de URL door de ingelogde medewerker
-        const url = injectAgentId(a.href);
+        const url = await injectAgentId(a.href);
         openDrawer(url, ticketId);
       });
       a.replaceWith(btn);
