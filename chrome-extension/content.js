@@ -362,6 +362,34 @@
     }, 300);
   }
 
+  // ── Ingelogde Zendesk-gebruiker ophalen ──────────────────────────────────────
+  function getLoggedInAgentId() {
+    // Methode 1: window.currentUser (Zendesk zet dit globaal)
+    if (window.currentUser && window.currentUser.id) {
+      return String(window.currentUser.id);
+    }
+    // Methode 2: meta-tag
+    const meta = document.querySelector('meta[name="current-user-id"]');
+    if (meta && meta.content) return meta.content;
+    // Methode 3: data-attribuut op body of html
+    const bodyId = document.body.dataset.currentUserId || document.documentElement.dataset.currentUserId;
+    if (bodyId) return bodyId;
+    // Fallback: geen id gevonden
+    return '';
+  }
+
+  // ── URL: vervang agent_id door ingelogde gebruiker ───────────────────────────
+  function injectAgentId(href) {
+    try {
+      const url = new URL(href);
+      const agentId = getLoggedInAgentId();
+      if (agentId) url.searchParams.set('agent_id', agentId);
+      return url.toString();
+    } catch(_) {
+      return href;
+    }
+  }
+
   // ── Link → knop ──────────────────────────────────────────────────────────────
   function convertLinks() {
     document.querySelectorAll(`a[href*="${REVIEW_HOST}"]`).forEach(a => {
@@ -383,7 +411,13 @@
         </svg>
         Bekijk concept
       `;
-      btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openDrawer(a.href, ticketId); });
+      btn.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Vervang agent_id in de URL door de ingelogde medewerker
+        const url = injectAgentId(a.href);
+        openDrawer(url, ticketId);
+      });
       a.replaceWith(btn);
     });
   }
