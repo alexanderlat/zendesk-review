@@ -8,6 +8,52 @@ const ZENDESK_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN;
 const ZENDESK_EMAIL = process.env.ZENDESK_EMAIL;
 const ZENDESK_TOKEN = process.env.ZENDESK_TOKEN;
 
+// ── Supabase helpers ─────────────────────────────────────────────────────────
+function supabaseHeaders() {
+  return {
+    'apikey': process.env.SUPABASE_KEY,
+    'Authorization': `Bearer ${process.env.SUPABASE_KEY}`,
+    'Content-Type': 'application/json'
+  };
+}
+
+// agent_stats tabel moet eenmalig worden aangemaakt in Supabase:
+// CREATE TABLE IF NOT EXISTS agent_stats (
+//   id bigserial PRIMARY KEY,
+//   agent_id text NOT NULL,
+//   ticket_id text NOT NULL,
+//   created_at timestamptz NOT NULL DEFAULT now()
+// );
+
+// Sla een verstuurde reactie op in agent_stats
+async function logAgentReply(agentId, ticketId) {
+  try {
+    const base = process.env.SUPABASE_URL || '';
+    await fetch(`${base}/agent_stats`, {
+      method: 'POST',
+      headers: { ...supabaseHeaders(), 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ agent_id: String(agentId), ticket_id: String(ticketId) })
+    });
+  } catch(_) {}
+}
+
+// Haal Zendesk agent-naam op via API (gecached)
+const _agentNameCache = {};
+async function getAgentName(agentId) {
+  if (_agentNameCache[agentId]) return _agentNameCache[agentId];
+  try {
+    const resp = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/users/${agentId}.json`, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      _agentNameCache[agentId] = data.user.name || agentId;
+      return _agentNameCache[agentId];
+    }
+  } catch(_) {}
+  return agentId;
+}
+
 async function vertaalNaarNederlands(tekst) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -974,6 +1020,9 @@ app.post('/reply', async (req, res) => {
     return res.sendStatus(500);
   }
 
+  // Log verstuurde reactie voor statistieken
+  if (agentId) logAgentReply(agentId, ticketId);
+
   const ticketResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
       'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64')
@@ -1016,6 +1065,147 @@ app.post('/reply', async (req, res) => {
   });
 
   res.sendStatus(200);
+});
+
+// ── Stats dashboard ──────────────────────────────────────────────────────────
+app.get('/stats', async (req, res) => {
+  const base = process.env.SUPABASE_URL || '';
+
+  // Haal alle agent_stats op (max 5000 rijen)
+  let rows = [];
+  try {
+    const resp = await fetch(`${base}/agent_stats?select=agent_id,created_at&order=created_at.desc&limit=5000`, {
+      headers: supabaseHeaders()
+    });
+    if (resp.ok) rows = await resp.json();
+  } catch(_) {}
+
+  // Verzamel unieke agent IDs en haal namen op
+  const agentIds = [...new Set(rows.map(r => r.agent_id))];
+  const agentNames = {};
+  await Promise.all(agentIds.map(async id => {
+    agentNames[id] = await getAgentName(id);
+  }));
+
+  // Groepeer per agent × periode
+  function periodKey(dateStr, periode) {
+    const d = new Date(dateStr);
+    if (periode === 'dag')   return d.toISOString().slice(0,10);
+    if (periode === 'week') {
+      const day = d.getDay() || 7;
+      const mon = new Date(d); mon.setDate(d.getDate() - day + 1);
+      return 'W ' + mon.toISOString().slice(0,10);
+    }
+    return d.toISOString().slice(0,7); // maand
+  }
+
+  function buildTabel(periode) {
+    const tabel = {}; // { periode: { agentId: count } }
+    rows.forEach(r => {
+      const p = periodKey(r.created_at, periode);
+      if (!tabel[p]) tabel[p] = {};
+      tabel[p][r.agent_id] = (tabel[p][r.agent_id] || 0) + 1;
+    });
+    return tabel;
+  }
+
+  const periodes = ['dag', 'week', 'maand'];
+  const tabellen = {};
+  periodes.forEach(p => tabellen[p] = buildTabel(p));
+
+  // Render HTML
+  function renderTabel(tabel, agentIds, agentNames) {
+    const periodeSleutels = Object.keys(tabel).sort().reverse().slice(0, 30);
+    if (periodeSleutels.length === 0) return '<p style="color:#9E9E96;font-size:13px">Nog geen data</p>';
+    const agents = agentIds.filter(id => periodeSleutels.some(p => tabel[p][id]));
+    let html = '<div class="tabel-wrap"><table><thead><tr><th>Periode</th>';
+    agents.forEach(id => { html += `<th>${agentNames[id] || id}</th>`; });
+    html += '<th>Totaal</th></tr></thead><tbody>';
+    let totalPerAgent = {};
+    periodeSleutels.forEach(p => {
+      const totaal = agents.reduce((s, id) => s + (tabel[p][id] || 0), 0);
+      html += `<tr><td class="periode">${p}</td>`;
+      agents.forEach(id => {
+        const n = tabel[p][id] || 0;
+        if (n) totalPerAgent[id] = (totalPerAgent[id]||0) + n;
+        html += `<td>${n || '<span class="nul">—</span>'}</td>`;
+      });
+      html += `<td class="totaal">${totaal}</td></tr>`;
+    });
+    html += '<tr class="sum"><td>Totaal</td>';
+    let gt = 0;
+    agents.forEach(id => { const n = totalPerAgent[id]||0; gt+=n; html += `<td>${n}</td>`; });
+    html += `<td>${gt}</td></tr>`;
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  res.send(`<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent statistieken — Latour</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --green: #1C3D2E; --green-mid: #2D5C44; --green-light: #E8F2EC;
+    --bg: #F4F5F3; --surface: #fff; --border: #E3E4E0;
+    --text: #1A1A18; --soft: #6B6B65; --xsoft: #9E9E96;
+  }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.5; }
+  .topbar { background: var(--green); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
+  .topbar h1 { font-size: 15px; font-weight: 600; }
+  .topbar span { font-size: 12px; opacity: 0.6; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+  .tab { padding: 7px 18px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--soft); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .tab.actief { background: var(--green); color: #fff; border-color: var(--green); }
+  .tab:hover:not(.actief) { background: var(--green-light); color: var(--green); border-color: var(--green-light); }
+  .panel { display: none; }
+  .panel.actief { display: block; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .tabel-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead tr { background: var(--bg); }
+  th { padding: 10px 14px; text-align: left; font-weight: 600; color: var(--soft); border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  td.periode { font-weight: 500; color: var(--text); white-space: nowrap; }
+  td.totaal { font-weight: 600; color: var(--green); }
+  tr.sum { background: var(--green-light); font-weight: 700; }
+  tr.sum td { border-top: 2px solid var(--border); color: var(--green); }
+  .nul { color: var(--xsoft); }
+  .meta { font-size: 12px; color: var(--xsoft); margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+  <h1>Agent statistieken</h1>
+  <span>Latour Tuinmeubelen · Claude Concept Review</span>
+</div>
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab actief" onclick="toonTab('maand')">Per maand</button>
+    <button class="tab" onclick="toonTab('week')">Per week</button>
+    <button class="tab" onclick="toonTab('dag')">Per dag</button>
+  </div>
+  <div id="tab-maand" class="panel actief card">${renderTabel(tabellen['maand'], agentIds, agentNames)}</div>
+  <div id="tab-week"  class="panel card">${renderTabel(tabellen['week'],  agentIds, agentNames)}</div>
+  <div id="tab-dag"   class="panel card">${renderTabel(tabellen['dag'],   agentIds, agentNames)}</div>
+  <p class="meta">${rows.length} verstuurde reacties in totaal · automatisch bijgehouden</p>
+</div>
+<script>
+  function toonTab(id) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('actief'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('actief'));
+    document.getElementById('tab-' + id).classList.add('actief');
+    event.target.classList.add('actief');
+  }
+</script>
+</body>
+</html>`);
 });
 
 app.listen(process.env.PORT || 3000, () => {
