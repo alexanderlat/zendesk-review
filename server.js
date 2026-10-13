@@ -78,6 +78,10 @@ async function vertaalNaarNederlands(tekst) {
     })
   });
   const data = await response.json();
+  if (!data.content || !data.content[0] || !data.content[0].text) {
+    console.error('[vertaal] onverwacht antwoord:', JSON.stringify(data).slice(0, 200));
+    return 'NL';
+  }
   return data.content[0].text.trim();
 }
 
