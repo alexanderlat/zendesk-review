@@ -29,12 +29,18 @@ function supabaseHeaders() {
 async function logAgentReply(agentId, ticketId) {
   try {
     const base = process.env.SUPABASE_URL || '';
-    await fetch(`${base}/agent_stats`, {
+    const url = `${base}/agent_stats`;
+    console.log('[stats] POST naar', url, 'agent:', agentId, 'ticket:', ticketId);
+    const resp = await fetch(url, {
       method: 'POST',
       headers: { ...supabaseHeaders(), 'Prefer': 'return=minimal' },
       body: JSON.stringify({ agent_id: String(agentId), ticket_id: String(ticketId) })
     });
-  } catch(_) {}
+    const tekst = await resp.text();
+    console.log('[stats] response', resp.status, tekst);
+  } catch(e) {
+    console.error('[stats] fout:', e.message);
+  }
 }
 
 // Haal Zendesk agent-naam op via API (gecached)
