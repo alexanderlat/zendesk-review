@@ -1027,7 +1027,8 @@ app.post('/reply', async (req, res) => {
   }
 
   // Log verstuurde reactie voor statistieken
-  if (agentId) logAgentReply(agentId, ticketId);
+  console.log('[stats] /reply aangeroepen, agentId:', agentId, 'ticketId:', ticketId);
+  logAgentReply(agentId || 'onbekend', ticketId);
 
   const ticketResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
