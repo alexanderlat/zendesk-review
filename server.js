@@ -78,11 +78,12 @@ async function vertaalNaarNederlands(tekst) {
     })
   });
   const data = await response.json();
-  if (!data.content || !data.content[0] || !data.content[0].text) {
-    console.error('[vertaal] onverwacht antwoord:', JSON.stringify(data).slice(0, 200));
+  const tekstBlok = data.content && data.content.find(b => b.type === 'text');
+  if (!tekstBlok) {
+    console.error('[vertaal] geen text blok:', JSON.stringify(data).slice(0, 200));
     return 'NL';
   }
-  return data.content[0].text.trim();
+  return tekstBlok.text.trim();
 }
 
 async function maakSamenvatting(comments) {
