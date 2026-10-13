@@ -369,17 +369,43 @@
   async function fetchLoggedInAgentId() {
     if (_cachedAgentId) return _cachedAgentId;
 
+    // Methode 1: Zendesk zet gebruikersinformatie in een script-tag als JSON
     try {
-      // Haal het subdomein op uit de huidige URL (bijv. latour-lith.zendesk.com)
-      const subdomain = location.hostname; // al op *.zendesk.com
-      const response = await fetch(`https://${subdomain}/api/v2/users/me.json`, {
-        credentials: 'include' // gebruik de bestaande Zendesk-sessie
+      const scripts = document.querySelectorAll('script');
+      for (const s of scripts) {
+        const m = s.textContent.match(/"current_user"\s*:\s*\{[^}]*"id"\s*:\s*(\d+)/);
+        if (m) { _cachedAgentId = m[1]; return _cachedAgentId; }
+      }
+    } catch(_) {}
+
+    // Methode 2: data-attribuut op een element in de DOM
+    try {
+      const el = document.querySelector('[data-user-id],[data-agent-id],[data-current-user-id]');
+      if (el) {
+        const id = el.dataset.userId || el.dataset.agentId || el.dataset.currentUserId;
+        if (id) { _cachedAgentId = id; return _cachedAgentId; }
+      }
+    } catch(_) {}
+
+    // Methode 3: Zendesk REST API via fetch met bestaande sessie
+    try {
+      const response = await fetch(`https://${location.hostname}/api/v2/users/me.json`, {
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
       });
       if (response.ok) {
         const data = await response.json();
-        _cachedAgentId = String(data.user.id);
-        return _cachedAgentId;
+        if (data.user && data.user.id) {
+          _cachedAgentId = String(data.user.id);
+          return _cachedAgentId;
+        }
       }
+    } catch(_) {}
+
+    // Methode 4: uit de cookies (Zendesk zet soms een _zendesk_session cookie)
+    try {
+      const match = document.cookie.match(/zd-user-id=(\d+)/);
+      if (match) { _cachedAgentId = match[1]; return _cachedAgentId; }
     } catch(_) {}
 
     return '';
