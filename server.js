@@ -25,22 +25,47 @@ function supabaseHeaders() {
 //   created_at timestamptz NOT NULL DEFAULT now()
 // );
 
-// Sla een verstuurde reactie op in agent_stats
-async function logAgentReply(agentId, ticketId) {
+// Sla een event op in agent_stats (event_type: 'sent' of 'generated')
+async function logAgentEvent(agentId, ticketId, eventType, extraData = {}) {
   try {
     const base = process.env.SUPABASE_URL || '';
     const url = `${base}/agent_stats`;
-    console.log('[stats] POST naar', url, 'agent:', agentId, 'ticket:', ticketId);
+    const payload = {
+      agent_id: String(agentId),
+      ticket_id: String(ticketId),
+      event_type: eventType,
+      ...extraData
+    };
+    console.log('[stats] POST naar', url, payload);
     const resp = await fetch(url, {
       method: 'POST',
       headers: { ...supabaseHeaders(), 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ agent_id: String(agentId), ticket_id: String(ticketId) })
+      body: JSON.stringify(payload)
     });
     const tekst = await resp.text();
     console.log('[stats] response', resp.status, tekst);
   } catch(e) {
     console.error('[stats] fout:', e.message);
   }
+}
+
+// Haal ticket metadata op voor stats logging
+async function getTicketMeta(ticketId) {
+  try {
+    const resp = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64') }
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const t = data.ticket;
+      return {
+        ticket_subject: (t.subject || '').slice(0, 200),
+        ticket_tags: (t.tags || []).join(',').slice(0, 500),
+        ticket_created_at: t.created_at
+      };
+    }
+  } catch(_) {}
+  return {};
 }
 
 // Haal Zendesk agent-naam op via API (gecached)
@@ -167,6 +192,11 @@ app.get('/ticket/:id', async (req, res) => {
   const conceptRaw = decodeURIComponent(req.query.concept || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
   const needsInput = conceptRaw.trim() === 'NEEDS_INPUT' || conceptRaw.trim() === '';
   const conceptTekst = needsInput ? '' : conceptRaw;
+
+  // Log concept gegenereerd (alleen als er een concept is, niet bij needs-input)
+  if (!needsInput && agentId) {
+    getTicketMeta(ticketId).then(meta => logAgentEvent(agentId, ticketId, 'generated', meta));
+  }
 
   // Geen Claude-calls meer hier — die gebeuren async vanuit de browser
   const toonVertaling = false; // wordt client-side bepaald
@@ -964,6 +994,11 @@ app.post('/genereer-concept', async (req, res) => {
 
   const claudeData = await claudeResponse.json();
   const antwoord = claudeData.content[0].text;
+
+  // Log concept gegenereerd
+  const agentIdGen = req.body.agentId || 'onbekend';
+  getTicketMeta(ticketId).then(meta => logAgentEvent(agentIdGen, ticketId, 'generated', meta));
+
   res.json({ antwoord });
 });
 
@@ -1033,7 +1068,7 @@ app.post('/reply', async (req, res) => {
 
   // Log verstuurde reactie voor statistieken
   console.log('[stats] /reply aangeroepen, agentId:', agentId, 'ticketId:', ticketId);
-  logAgentReply(agentId || 'onbekend', ticketId);
+  getTicketMeta(ticketId).then(meta => logAgentEvent(agentId || 'onbekend', ticketId, 'sent', meta));
 
   const ticketResponse = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
     headers: {
@@ -1086,34 +1121,39 @@ app.get('/stats', async (req, res) => {
   // Haal alle agent_stats op (max 5000 rijen)
   let rows = [];
   try {
-    const resp = await fetch(`${base}/agent_stats?select=agent_id,created_at&order=created_at.desc&limit=5000`, {
+    const resp = await fetch(`${base}/agent_stats?select=agent_id,ticket_id,event_type,created_at,ticket_subject,ticket_tags,ticket_created_at&order=created_at.desc&limit=5000`, {
       headers: supabaseHeaders()
     });
     if (resp.ok) rows = await resp.json();
   } catch(_) {}
 
+  // Splits in sent en generated
+  const sentRows = rows.filter(r => !r.event_type || r.event_type === 'sent');
+  const genRows  = rows.filter(r => r.event_type === 'generated');
+
   // Verzamel unieke agent IDs en haal namen op
-  const agentIds = [...new Set(rows.map(r => r.agent_id))];
+  const agentIds = [...new Set(sentRows.map(r => r.agent_id))];
+  const allAgentIds = [...new Set(rows.map(r => r.agent_id))];
   const agentNames = {};
-  await Promise.all(agentIds.map(async id => {
+  await Promise.all(allAgentIds.map(async id => {
     agentNames[id] = await getAgentName(id);
   }));
 
-  // Groepeer per agent × periode
+  // ── Groepeer per agent × periode (voor bestaande tabellen) ──
   function periodKey(dateStr, periode) {
     const d = new Date(dateStr);
-    if (periode === 'dag')   return d.toISOString().slice(0,10);
+    if (periode === 'dag') return d.toISOString().slice(0,10);
     if (periode === 'week') {
       const day = d.getDay() || 7;
       const mon = new Date(d); mon.setDate(d.getDate() - day + 1);
       return 'W ' + mon.toISOString().slice(0,10);
     }
-    return d.toISOString().slice(0,7); // maand
+    return d.toISOString().slice(0,7);
   }
 
-  function buildTabel(periode) {
-    const tabel = {}; // { periode: { agentId: count } }
-    rows.forEach(r => {
+  function buildTabel(dataRows, periode) {
+    const tabel = {};
+    dataRows.forEach(r => {
       const p = periodKey(r.created_at, periode);
       if (!tabel[p]) tabel[p] = {};
       tabel[p][r.agent_id] = (tabel[p][r.agent_id] || 0) + 1;
@@ -1123,15 +1163,14 @@ app.get('/stats', async (req, res) => {
 
   const periodes = ['dag', 'week', 'maand'];
   const tabellen = {};
-  periodes.forEach(p => tabellen[p] = buildTabel(p));
+  periodes.forEach(p => tabellen[p] = buildTabel(sentRows, p));
 
-  // Render HTML
-  function renderTabel(tabel, agentIds, agentNames) {
+  function renderTabel(tabel, aIds, aNames) {
     const periodeSleutels = Object.keys(tabel).sort().reverse().slice(0, 30);
-    if (periodeSleutels.length === 0) return '<p style="color:#9E9E96;font-size:13px">Nog geen data</p>';
-    const agents = agentIds.filter(id => periodeSleutels.some(p => tabel[p][id]));
+    if (periodeSleutels.length === 0) return '<p class="geen-data">Nog geen data</p>';
+    const agents = aIds.filter(id => periodeSleutels.some(p => tabel[p][id]));
     let html = '<div class="tabel-wrap"><table><thead><tr><th>Periode</th>';
-    agents.forEach(id => { html += `<th>${agentNames[id] || id}</th>`; });
+    agents.forEach(id => { html += `<th>${aNames[id] || id}</th>`; });
     html += '<th>Totaal</th></tr></thead><tbody>';
     let totalPerAgent = {};
     periodeSleutels.forEach(p => {
@@ -1147,7 +1186,184 @@ app.get('/stats', async (req, res) => {
     html += '<tr class="sum"><td>Totaal</td>';
     let gt = 0;
     agents.forEach(id => { const n = totalPerAgent[id]||0; gt+=n; html += `<td>${n}</td>`; });
-    html += `<td>${gt}</td></tr>`;
+    html += `<td>${gt}</td></tr></tbody></table></div>`;
+    return html;
+  }
+
+  // ── Acceptatiegraad ──
+  function renderAcceptatie() {
+    if (genRows.length === 0) return '<p class="geen-data">Nog geen data — acceptatiegraad wordt bijgehouden vanaf nu</p>';
+    // Per agent: generated vs sent
+    const genPerAgent = {};
+    const sentPerAgent = {};
+    genRows.forEach(r => { genPerAgent[r.agent_id] = (genPerAgent[r.agent_id]||0) + 1; });
+    sentRows.forEach(r => { sentPerAgent[r.agent_id] = (sentPerAgent[r.agent_id]||0) + 1; });
+    const alleAgents = [...new Set([...Object.keys(genPerAgent), ...Object.keys(sentPerAgent)])];
+    const totalGen = Object.values(genPerAgent).reduce((a,b)=>a+b,0);
+    const totalSent = Object.values(sentPerAgent).reduce((a,b)=>a+b,0);
+    const totalPct = totalGen > 0 ? Math.round(totalSent/totalGen*100) : 0;
+
+    let html = `<div class="accept-totaal">
+      <div class="accept-big">${totalPct}%</div>
+      <div class="accept-sub">van alle gegenereerde concepten verstuurd (${totalSent} van ${totalGen})</div>
+      <div class="accept-bar-wrap"><div class="accept-bar" style="width:${totalPct}%"></div></div>
+    </div>
+    <div class="tabel-wrap"><table><thead><tr><th>Agent</th><th>Gegenereerd</th><th>Verstuurd</th><th>Acceptatiegraad</th></tr></thead><tbody>`;
+    alleAgents.forEach(id => {
+      const g = genPerAgent[id]||0;
+      const s = sentPerAgent[id]||0;
+      const pct = g > 0 ? Math.round(s/g*100) : 0;
+      html += `<tr><td class="periode">${agentNames[id]||id}</td><td>${g}</td><td>${s}</td>
+        <td><div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:6px;background:#E3E4E0;border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:#2D5C44;border-radius:3px"></div>
+          </div>
+          <span style="font-weight:600;color:#1C3D2E;min-width:36px">${pct}%</span>
+        </div></td></tr>`;
+    });
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  // ── Heatmap actieve uren ──
+  function renderHeatmap() {
+    if (sentRows.length === 0) return '<p class="geen-data">Nog geen data</p>';
+    const dagen = ['Ma','Di','Wo','Do','Vr','Za','Zo'];
+    // dag: 0=zo, 1=ma... → omzetten naar 0=ma
+    const counts = Array.from({length:7}, () => Array(24).fill(0));
+    sentRows.forEach(r => {
+      const d = new Date(r.created_at);
+      const dag = (d.getDay() + 6) % 7; // 0=ma
+      const uur = d.getHours();
+      counts[dag][uur]++;
+    });
+    const maxVal = Math.max(...counts.flat(), 1);
+
+    let html = '<div class="heatmap-wrap"><div class="heatmap">';
+    // Header uren
+    html += '<div class="heatmap-row"><div class="heatmap-label"></div>';
+    for(let u=0;u<24;u++) html += `<div class="heatmap-uur">${u}</div>`;
+    html += '</div>';
+    // Rijen per dag
+    for(let d=0;d<7;d++) {
+      html += `<div class="heatmap-row"><div class="heatmap-label">${dagen[d]}</div>`;
+      for(let u=0;u<24;u++) {
+        const v = counts[d][u];
+        const opacity = v === 0 ? 0 : 0.1 + 0.9*(v/maxVal);
+        const title = v > 0 ? `${dagen[d]} ${u}:00 — ${v} reactie${v>1?'s':''}` : '';
+        html += `<div class="heatmap-cel" style="background:rgba(44,92,68,${opacity.toFixed(2)})" title="${title}">${v||''}</div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  // ── Ticket categorieën (tags) ──
+  function renderCategorien() {
+    const tagCounts = {};
+    sentRows.forEach(r => {
+      if (!r.ticket_tags) return;
+      r.ticket_tags.split(',').forEach(tag => {
+        tag = tag.trim();
+        if (tag && tag.length > 1) tagCounts[tag] = (tagCounts[tag]||0) + 1;
+      });
+    });
+    const sorted = Object.entries(tagCounts).sort((a,b)=>b[1]-a[1]).slice(0,20);
+    if (sorted.length === 0) return '<p class="geen-data">Nog geen data — categorieën worden bijgehouden vanaf nu</p>';
+    const maxV = sorted[0][1];
+    let html = '<div class="tag-lijst">';
+    sorted.forEach(([tag, n]) => {
+      const pct = Math.round(n/maxV*100);
+      html += `<div class="tag-rij">
+        <div class="tag-naam">${tag}</div>
+        <div class="tag-bar-wrap">
+          <div class="tag-bar" style="width:${pct}%"></div>
+        </div>
+        <div class="tag-n">${n}</div>
+      </div>`;
+    });
+    html += '</div>';
+    return html;
+  }
+
+  // ── Leaderboard ──
+  function renderLeaderboard() {
+    if (sentRows.length === 0) return '<p class="geen-data">Nog geen data</p>';
+    const totalen = {};
+    const dezeWeek = {};
+    const dezeWeekStr = periodKey(new Date().toISOString(), 'week');
+    sentRows.forEach(r => {
+      totalen[r.agent_id] = (totalen[r.agent_id]||0) + 1;
+      if (periodKey(r.created_at, 'week') === dezeWeekStr) {
+        dezeWeek[r.agent_id] = (dezeWeek[r.agent_id]||0) + 1;
+      }
+    });
+    const sorted = Object.entries(totalen).sort((a,b)=>b[1]-a[1]);
+    const maxTot = sorted[0]?.[1] || 1;
+    const medals = ['🥇','🥈','🥉'];
+
+    let html = '<div class="leader-lijst">';
+    sorted.forEach(([id, n], i) => {
+      const naam = agentNames[id]||id;
+      const week = dezeWeek[id]||0;
+      const genCount = (rows.filter(r=>r.agent_id===id&&r.event_type==='generated').length);
+      const pct = genCount > 0 ? Math.round(n/genCount*100) : null;
+      html += `<div class="leader-rij">
+        <div class="leader-rank">${medals[i]||('#'+(i+1))}</div>
+        <div class="leader-info">
+          <div class="leader-naam">${naam}</div>
+          <div class="leader-meta">${week} deze week · ${pct !== null ? pct+'% acceptatie' : 'acceptatie n.v.t.'}</div>
+          <div class="leader-bar-wrap"><div class="leader-bar" style="width:${Math.round(n/maxTot*100)}%"></div></div>
+        </div>
+        <div class="leader-totaal">${n}</div>
+      </div>`;
+    });
+    html += '</div>';
+    return html;
+  }
+
+  // ── Gemiddelde responstijd ──
+  function renderResponstijd() {
+    const metTijd = sentRows.filter(r => r.ticket_created_at);
+    if (metTijd.length === 0) return '<p class="geen-data">Nog geen data — responstijd wordt bijgehouden vanaf nu</p>';
+    const tijden = metTijd.map(r => {
+      const diff = new Date(r.created_at) - new Date(r.ticket_created_at);
+      return diff / 1000 / 60; // minuten
+    }).filter(t => t > 0 && t < 60*24*30); // filter outliers (> 30 dagen)
+
+    if (tijden.length === 0) return '<p class="geen-data">Nog geen geldige responstijden</p>';
+
+    const gem = tijden.reduce((a,b)=>a+b,0) / tijden.length;
+    const med = [...tijden].sort((a,b)=>a-b)[Math.floor(tijden.length/2)];
+
+    function fmtMin(m) {
+      if (m < 60) return Math.round(m) + ' min';
+      const h = Math.floor(m/60), min = Math.round(m%60);
+      return h + 'u ' + (min > 0 ? min + 'min' : '');
+    }
+
+    // Per agent
+    const agentTijden = {};
+    metTijd.forEach(r => {
+      const diff = (new Date(r.created_at) - new Date(r.ticket_created_at)) / 60000;
+      if (diff > 0 && diff < 60*24*30) {
+        if (!agentTijden[r.agent_id]) agentTijden[r.agent_id] = [];
+        agentTijden[r.agent_id].push(diff);
+      }
+    });
+
+    let html = `<div class="resp-kpis">
+      <div class="resp-kpi"><div class="resp-kpi-val">${fmtMin(gem)}</div><div class="resp-kpi-lbl">Gemiddeld</div></div>
+      <div class="resp-kpi"><div class="resp-kpi-val">${fmtMin(med)}</div><div class="resp-kpi-lbl">Mediaan</div></div>
+      <div class="resp-kpi"><div class="resp-kpi-val">${tijden.length}</div><div class="resp-kpi-lbl">Metingen</div></div>
+    </div>
+    <div class="tabel-wrap"><table><thead><tr><th>Agent</th><th>Gem. responstijd</th><th>Mediaan</th><th>Reacties</th></tr></thead><tbody>`;
+    Object.entries(agentTijden).sort((a,b)=>a[1].reduce((x,y)=>x+y,0)/a[1].length - b[1].reduce((x,y)=>x+y,0)/b[1].length).forEach(([id, ts]) => {
+      const g = ts.reduce((a,b)=>a+b,0)/ts.length;
+      const m = [...ts].sort((a,b)=>a-b)[Math.floor(ts.length/2)];
+      html += `<tr><td class="periode">${agentNames[id]||id}</td><td>${fmtMin(g)}</td><td>${fmtMin(m)}</td><td>${ts.length}</td></tr>`;
+    });
     html += '</tbody></table></div>';
     return html;
   }
@@ -1168,15 +1384,24 @@ app.get('/stats', async (req, res) => {
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.5; }
   .topbar { background: var(--green); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
   .topbar h1 { font-size: 15px; font-weight: 600; }
-  .topbar span { font-size: 12px; opacity: 0.6; }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px; }
-  .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
-  .tab { padding: 7px 18px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--soft); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .topbar span { font-size: 12px; opacity: 0.6; margin-left: auto; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 28px 20px; display: flex; flex-direction: column; gap: 28px; }
+
+  /* Sectie headers */
+  .sectie { display: flex; flex-direction: column; gap: 10px; }
+  .sectie-titel { font-size: 13px; font-weight: 600; color: var(--soft); display: flex; align-items: center; gap: 7px; }
+  .sectie-titel svg { opacity: 0.6; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; }
+  .tab { padding: 6px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--soft); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
   .tab.actief { background: var(--green); color: #fff; border-color: var(--green); }
-  .tab:hover:not(.actief) { background: var(--green-light); color: var(--green); border-color: var(--green-light); }
+  .tab:hover:not(.actief) { background: var(--green-light); color: var(--green); }
   .panel { display: none; }
   .panel.actief { display: block; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+  /* Tabellen */
   .tabel-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead tr { background: var(--bg); }
@@ -1185,10 +1410,57 @@ app.get('/stats', async (req, res) => {
   tr:last-child td { border-bottom: none; }
   td.periode { font-weight: 500; color: var(--text); white-space: nowrap; }
   td.totaal { font-weight: 600; color: var(--green); }
-  tr.sum { background: var(--green-light); font-weight: 700; }
-  tr.sum td { border-top: 2px solid var(--border); color: var(--green); }
+  tr.sum { background: var(--green-light); }
+  tr.sum td { border-top: 2px solid var(--border); color: var(--green); font-weight: 700; }
   .nul { color: var(--xsoft); }
-  .meta { font-size: 12px; color: var(--xsoft); margin-top: 12px; }
+  .geen-data { color: var(--xsoft); font-size: 13px; padding: 20px; }
+
+  /* Acceptatiegraad */
+  .accept-totaal { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); }
+  .accept-big { font-size: 40px; font-weight: 700; color: var(--green); line-height: 1; }
+  .accept-sub { font-size: 13px; color: var(--soft); margin-top: 4px; margin-bottom: 10px; }
+  .accept-bar-wrap { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; max-width: 400px; }
+  .accept-bar { height: 100%; background: var(--green-mid); border-radius: 4px; transition: width 0.5s; }
+
+  /* Heatmap */
+  .heatmap-wrap { padding: 16px; overflow-x: auto; }
+  .heatmap { display: flex; flex-direction: column; gap: 3px; min-width: 600px; }
+  .heatmap-row { display: flex; align-items: center; gap: 3px; }
+  .heatmap-label { width: 28px; font-size: 11px; color: var(--soft); font-weight: 500; flex-shrink: 0; }
+  .heatmap-uur { width: 28px; font-size: 10px; color: var(--xsoft); text-align: center; flex-shrink: 0; }
+  .heatmap-cel { width: 28px; height: 22px; border-radius: 3px; background: #E3E4E0; flex-shrink: 0; font-size: 9px; display: flex; align-items: center; justify-content: center; color: rgba(0,0,0,0.4); cursor: default; }
+
+  /* Tags */
+  .tag-lijst { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .tag-rij { display: flex; align-items: center; gap: 10px; }
+  .tag-naam { width: 160px; font-size: 13px; font-weight: 500; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag-bar-wrap { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .tag-bar { height: 100%; background: var(--green-mid); border-radius: 4px; }
+  .tag-n { width: 36px; text-align: right; font-size: 13px; color: var(--soft); flex-shrink: 0; }
+
+  /* Leaderboard */
+  .leader-lijst { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .leader-rij { display: flex; align-items: center; gap: 14px; }
+  .leader-rank { font-size: 20px; width: 32px; flex-shrink: 0; text-align: center; }
+  .leader-info { flex: 1; }
+  .leader-naam { font-size: 14px; font-weight: 600; }
+  .leader-meta { font-size: 12px; color: var(--soft); margin: 2px 0 5px; }
+  .leader-bar-wrap { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .leader-bar { height: 100%; background: var(--green-mid); border-radius: 3px; }
+  .leader-totaal { font-size: 22px; font-weight: 700; color: var(--green); min-width: 44px; text-align: right; }
+
+  /* Responstijd KPIs */
+  .resp-kpis { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .resp-kpi { flex: 1; padding: 18px 20px; border-right: 1px solid var(--border); }
+  .resp-kpi:last-child { border-right: none; }
+  .resp-kpi-val { font-size: 28px; font-weight: 700; color: var(--green); line-height: 1; }
+  .resp-kpi-lbl { font-size: 12px; color: var(--soft); margin-top: 4px; }
+
+  .meta { font-size: 12px; color: var(--xsoft); }
+
+  /* Twee-koloms grid voor kleinere secties */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -1198,22 +1470,80 @@ app.get('/stats', async (req, res) => {
   <span>Latour Tuinmeubelen · Claude Concept Review</span>
 </div>
 <div class="wrap">
-  <div class="tabs">
-    <button class="tab actief" onclick="toonTab('maand')">Per maand</button>
-    <button class="tab" onclick="toonTab('week')">Per week</button>
-    <button class="tab" onclick="toonTab('dag')">Per dag</button>
+
+  <!-- Verstuurde reacties -->
+  <div class="sectie">
+    <div class="sectie-titel">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+      Verstuurde reacties
+    </div>
+    <div class="tabs">
+      <button class="tab actief" onclick="toonTab('maand',this)">Per maand</button>
+      <button class="tab" onclick="toonTab('week',this)">Per week</button>
+      <button class="tab" onclick="toonTab('dag',this)">Per dag</button>
+    </div>
+    <div id="tab-maand" class="panel actief card">${renderTabel(tabellen['maand'], agentIds, agentNames)}</div>
+    <div id="tab-week"  class="panel card">${renderTabel(tabellen['week'],  agentIds, agentNames)}</div>
+    <div id="tab-dag"   class="panel card">${renderTabel(tabellen['dag'],   agentIds, agentNames)}</div>
   </div>
-  <div id="tab-maand" class="panel actief card">${renderTabel(tabellen['maand'], agentIds, agentNames)}</div>
-  <div id="tab-week"  class="panel card">${renderTabel(tabellen['week'],  agentIds, agentNames)}</div>
-  <div id="tab-dag"   class="panel card">${renderTabel(tabellen['dag'],   agentIds, agentNames)}</div>
-  <p class="meta">${rows.length} verstuurde reacties in totaal · automatisch bijgehouden</p>
+
+  <div class="grid-2">
+
+    <!-- Leaderboard -->
+    <div class="sectie">
+      <div class="sectie-titel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        Leaderboard
+      </div>
+      <div class="card">${renderLeaderboard()}</div>
+    </div>
+
+    <!-- Acceptatiegraad -->
+    <div class="sectie">
+      <div class="sectie-titel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Acceptatiegraad
+      </div>
+      <div class="card">${renderAcceptatie()}</div>
+    </div>
+
+  </div>
+
+  <!-- Gemiddelde responstijd -->
+  <div class="sectie">
+    <div class="sectie-titel">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Gemiddelde responstijd
+    </div>
+    <div class="card">${renderResponstijd()}</div>
+  </div>
+
+  <!-- Heatmap actieve uren -->
+  <div class="sectie">
+    <div class="sectie-titel">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Actieve uren (dag × uur)
+    </div>
+    <div class="card">${renderHeatmap()}</div>
+  </div>
+
+  <!-- Ticket categorieën -->
+  <div class="sectie">
+    <div class="sectie-titel">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+      Ticket categorieën (tags)
+    </div>
+    <div class="card">${renderCategorien()}</div>
+  </div>
+
+  <p class="meta">${sentRows.length} verstuurde reacties in totaal · automatisch bijgehouden</p>
 </div>
 <script>
-  function toonTab(id) {
+  function toonTab(id, btn) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('actief'));
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('actief'));
+    btn.closest('.sectie').querySelectorAll('.tab').forEach(t => t.classList.remove('actief'));
     document.getElementById('tab-' + id).classList.add('actief');
-    event.target.classList.add('actief');
+    btn.classList.add('actief');
   }
 </script>
 </body>
