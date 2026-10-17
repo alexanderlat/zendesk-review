@@ -111,6 +111,34 @@ async function vertaalNaarNederlands(tekst) {
   return tekstBlok.text.trim();
 }
 
+// Extraheer de kern van de oplossing (geen schrijfstijl, geen aanhef/afsluiting)
+async function extractOplossing(subject, vraag, antwoord) {
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 400,
+        messages: [{
+          role: 'user',
+          content: `Je krijgt een klantvraag en een antwoord van een medewerker. Extraheer alleen de inhoudelijke oplossing of het antwoord: wat is er concreet gedaan of gezegd? Geen aanhef, geen afsluiting, geen schrijfstijl. Kort en feitelijk, maximaal 3 zinnen.\n\nOnderwerp: ${subject}\nVraag: ${vraag.slice(0, 500)}\nAntwoord: ${antwoord.slice(0, 800)}\n\nOplossing:`
+        }]
+      })
+    });
+    const data = await response.json();
+    const blok = data.content && data.content.find(b => b.type === 'text');
+    return blok ? blok.text.trim().slice(0, 600) : '';
+  } catch(e) {
+    console.error('[oplossing] extractie mislukt:', e.message);
+    return '';
+  }
+}
+
 async function maakSamenvatting(comments) {
   const gesprek = comments.map((c, i) => {
     const rol = i === 0 ? 'Klant' : (c.via && c.via.channel === 'web' ? 'Medewerker' : 'Klant');
@@ -1094,6 +1122,13 @@ app.post('/reply', async (req, res) => {
   const openaiData = await openaiResponse.json();
   const embedding = openaiData.data[0].embedding;
 
+  // Extraheer de inhoudelijke oplossing (asynchroon, blokkeert niet)
+  const oplossing = await extractOplossing(
+    ticket.subject || '',
+    ticket.description || '',
+    reply
+  );
+
   await fetch(`${process.env.SUPABASE_URL}/tickets`, {
     method: 'POST',
     headers: {
@@ -1107,6 +1142,7 @@ app.post('/reply', async (req, res) => {
       subject: ticket.subject || '',
       vraag: (ticket.description || '').slice(0, 1000),
       antwoord: reply.slice(0, 1000),
+      oplossing: oplossing,
       embedding: embedding
     })
   });
