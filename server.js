@@ -1122,32 +1122,29 @@ app.post('/reply', async (req, res) => {
   const openaiData = await openaiResponse.json();
   const embedding = openaiData.data[0].embedding;
 
-  // Extraheer de inhoudelijke oplossing (asynchroon, blokkeert niet)
-  const oplossing = await extractOplossing(
-    ticket.subject || '',
-    ticket.description || '',
-    reply
-  );
-
-  await fetch(`${process.env.SUPABASE_URL}/tickets`, {
-    method: 'POST',
-    headers: {
-      'apikey': process.env.SUPABASE_KEY,
-      'Authorization': `Bearer ${process.env.SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=minimal'
-    },
-    body: JSON.stringify({
-      zendesk_id: String(ticketId),
-      subject: ticket.subject || '',
-      vraag: (ticket.description || '').slice(0, 1000),
-      antwoord: reply.slice(0, 1000),
-      oplossing: oplossing,
-      embedding: embedding
-    })
-  });
-
+  // Stuur meteen 200 terug — opslag en extractie gebeuren op de achtergrond
   res.sendStatus(200);
+
+  // Asynchroon: extraheer oplossing en sla ticket op (blokkeert medewerker niet)
+  extractOplossing(ticket.subject || '', ticket.description || '', reply).then(oplossing => {
+    return fetch(`${process.env.SUPABASE_URL}/tickets`, {
+      method: 'POST',
+      headers: {
+        'apikey': process.env.SUPABASE_KEY,
+        'Authorization': `Bearer ${process.env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        zendesk_id: String(ticketId),
+        subject: ticket.subject || '',
+        vraag: (ticket.description || '').slice(0, 1000),
+        antwoord: reply.slice(0, 1000),
+        oplossing: oplossing,
+        embedding: embedding
+      })
+    });
+  }).catch(e => console.error('[tickets] opslag mislukt:', e.message));
 });
 
 // ── Stats dashboard ──────────────────────────────────────────────────────────
