@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Latour – Claude Concept Review",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Opent Claude concept reviews als slide-in panel in Zendesk.",
   "content_scripts": [
     {
