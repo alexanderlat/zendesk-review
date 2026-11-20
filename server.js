@@ -44,6 +44,17 @@ async function logAgentEvent(agentId, ticketId, eventType, extraData = {}) {
     });
     const tekst = await resp.text();
     console.log('[stats] response', resp.status, tekst);
+    // Als de extra kolommen (event_type, ticket_subject, ...) nog niet bestaan in
+    // Supabase, sla dan in elk geval de basisgegevens op zodat er niets verloren gaat.
+    if (!resp.ok) {
+      const basis = { agent_id: payload.agent_id, ticket_id: payload.ticket_id };
+      const retry = await fetch(url, {
+        method: 'POST',
+        headers: { ...supabaseHeaders(), 'Prefer': 'return=minimal' },
+        body: JSON.stringify(basis)
+      });
+      console.log('[stats] fallback insert (alleen basisvelden)', retry.status, await retry.text());
+    }
   } catch(e) {
     console.error('[stats] fout:', e.message);
   }
@@ -1153,12 +1164,32 @@ app.get('/stats', async (req, res) => {
 
   // Haal alle agent_stats op (max 5000 rijen)
   let rows = [];
+  let statsFout = '';
   try {
     const resp = await fetch(`${base}/agent_stats?select=agent_id,ticket_id,event_type,created_at,ticket_subject,ticket_tags,ticket_created_at&order=created_at.desc&limit=5000`, {
       headers: supabaseHeaders()
     });
-    if (resp.ok) rows = await resp.json();
-  } catch(_) {}
+    if (resp.ok) {
+      rows = await resp.json();
+    } else {
+      statsFout = `Supabase ${resp.status}: ${(await resp.text()).slice(0, 300)}`;
+      console.error('[stats] uitgebreide query mislukt —', statsFout);
+      // Val terug op de basiskolommen zodat het dashboard in elk geval de aantallen toont
+      const basisResp = await fetch(`${base}/agent_stats?select=agent_id,ticket_id,created_at&order=created_at.desc&limit=5000`, {
+        headers: supabaseHeaders()
+      });
+      if (basisResp.ok) {
+        rows = await basisResp.json();
+        statsFout += ' — basisgegevens worden getoond; voer de migratie uit voor acceptatiegraad, categorieën en responstijd.';
+      } else {
+        statsFout += ` | basisquery: ${basisResp.status} ${(await basisResp.text()).slice(0, 200)}`;
+      }
+    }
+  } catch(e) {
+    statsFout = 'Kan Supabase niet bereiken: ' + e.message;
+    console.error('[stats]', statsFout);
+  }
+  const escHtml = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
   // Splits in sent en generated
   const sentRows = rows.filter(r => !r.event_type || r.event_type === 'sent');
@@ -1503,6 +1534,7 @@ app.get('/stats', async (req, res) => {
   <span>Latour Tuinmeubelen · Claude Concept Review</span>
 </div>
 <div class="wrap">
+  ${statsFout ? `<div style="background:#fff4e5;border:1px solid #f0b46c;color:#7a4b00;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px"><strong>Statistieken konden niet volledig geladen worden.</strong><br>${escHtml(statsFout)}</div>` : ''}
 
   <!-- Verstuurde reacties -->
   <div class="sectie">
